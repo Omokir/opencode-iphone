@@ -4,6 +4,12 @@ import Foundation
 struct ModelsTest {
     static func main() throws {
         let decoder = JSONDecoder()
+        let searchURL = URLComponents(string: SessionSearch.path(query: "  Café & plano?  ", cursor: "opaque+/=&"))!
+        let searchItems = Dictionary(uniqueKeysWithValues: searchURL.queryItems!.map { ($0.name, $0.value!) })
+        precondition(searchItems["search"] == "Café & plano?")
+        precondition(searchItems["cursor"] == "opaque+/=&" && searchItems["order"] == nil)
+        precondition(SessionSearch.path(query: "hello").contains("order=desc"))
+        print("PASS: server search query encoding and opaque cursor pagination")
         let sessionJSON = #"{"data":[{"id":"ses_123","title":"Example","location":{"directory":"/workspace"},"model":{"providerID":"example","id":"model"}}],"cursor":{"next":"older","previous":null}}"#
         let sessions = try decoder.decode(Page<Session>.self, from: Data(sessionJSON.utf8))
         precondition(sessions.data.first?.model?.id == "model")

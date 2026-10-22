@@ -19,8 +19,10 @@ def battery_status(root=Path('/sys/class/power_supply')):
         nodes = list(Path(root).iterdir())
     except OSError:
         nodes = []
-    batteries = [node for node in nodes if text(node / 'type') == 'Battery' and text(node / 'present') != '0']
-    online = [number(node / 'online') for node in nodes if text(node / 'type') in ('Mains', 'USB', 'USB_C', 'USB_PD')]
+    # Connected iPhones/mice can expose type=Battery, scope=Device with no
+    # capacity. They must never be aggregated into the notebook's batteries.
+    batteries = [node for node in nodes if text(node / 'type') == 'Battery' and text(node / 'scope') != 'Device' and text(node / 'present') != '0']
+    online = [number(node / 'online') for node in nodes if text(node / 'scope') != 'Device' and text(node / 'type') in ('Mains', 'USB', 'USB_C', 'USB_PD')]
     online = [value for value in online if value in (0, 1)]
     result = {'available': bool(batteries), 'percentage': None, 'charging': None,
               'onAC': any(online) if online else None, 'state': None}

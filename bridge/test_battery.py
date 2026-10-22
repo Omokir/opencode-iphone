@@ -46,3 +46,13 @@ class BatteryTests(unittest.TestCase):
         self.node('BAT0', {'type': 'Battery', 'energy_now': 10, 'energy_full': 20})
         self.node('BAT1', {'type': 'Battery', 'energy_now': 90, 'energy_full': 100})
         self.assertEqual(battery_status(self.root)['percentage'], 83)
+
+    def test_connected_iphone_does_not_hide_notebook_percentage(self):
+        self.node('BAT0', {'type': 'Battery', 'capacity': 54, 'status': 'Discharging'})
+        self.node('apple_mfi', {'type': 'Battery', 'scope': 'Device'})
+        self.node('phone_usb', {'type': 'USB', 'scope': 'Device', 'online': 1})
+        self.node('AC', {'type': 'Mains', 'online': 0})
+        status = battery_status(self.root)
+        self.assertEqual(status['percentage'], 54)
+        self.assertFalse(status['onAC'])
+        self.assertEqual(status['state'], 'Discharging')

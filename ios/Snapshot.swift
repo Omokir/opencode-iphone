@@ -55,7 +55,16 @@ import SwiftUI
                       "accountLabel": "u***@example.invalid", "plan": "plus", "weekly": ["usedPercent": 36, "windowMinutes": 10080, "resetsAt": Date().timeIntervalSince1970 + 172800]]
         }
         else if route == "/phone/status" { result = ["awake": true, "battery": ["available": true, "percentage": 46, "charging": true, "onAC": true, "state": "Charging"]] }
-        else if route == "/api/session" { result = ["data": [object]] }
+        else if route == "/api/session" {
+            let query = URLComponents(string: "https://fixture.invalid" + path)?.queryItems?.first { $0.name == "search" }?.value ?? ""
+            if query.isEmpty { result = ["data": [object]] }
+            else {
+                var found = object
+                found["id"] = "ses_search_only"
+                found["title"] = "Conversa antiga pesquisável"
+                result = ["data": query.lowercased().contains("antiga") ? [found] : []]
+            }
+        }
         else if route.hasSuffix("/message") {
             result = ["data": [
                 ["id": "msg_1", "type": "user", "text": "Analise projeto e proponha plano antes de alterar arquivos.", "time": ["created": 1]],
@@ -82,6 +91,7 @@ struct SnapshotRoot: View {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--snapshot-chat") { NavigationStack { ChatView(session: session) } }
         else if arguments.contains("--snapshot-sessions") { SnapshotConversationsView() }
+        else if arguments.contains("--snapshot-search") { SessionsView() }
         else if arguments.contains("--snapshot-control") { PhoneControlView() }
         else if arguments.contains("--snapshot-question") { QuestionFormView(question: Snapshot.question, session: session) { } }
         else if arguments.contains("--snapshot-files") { FileBrowserView() }

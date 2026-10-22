@@ -51,6 +51,9 @@ forwarded. Native client coalesces changes, refreshes small assistant pages and
 reconciles history after reconnect. Periodic read-only refresh remains fallback;
 writes/prompts are never silently retried. Inline attachment base64 is omitted
 from mobile history projections rather than resent on every update.
+Initial/non-paged descending history is capped at 15 recent messages by the
+gateway; opaque cursor pages remain available for older history. Notebook
+battery readings exclude `scope=Device` peripherals such as a connected iPhone.
 
 The Plan/Build defect came from Session equality comparing only ID. Equality now
 includes decoded metadata so SwiftUI notices a mode/title/model change. A mode

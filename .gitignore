@@ -5,3 +5,12 @@ __pycache__/
 *.xcuserstate
 *.secret
 pairing.json
+*.mobileprovision
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+*.log
+DerivedData/

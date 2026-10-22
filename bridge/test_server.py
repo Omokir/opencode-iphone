@@ -201,6 +201,12 @@ class GatewayTests(unittest.TestCase):
         self.assertNotIn('large-output', json.dumps(result))
         self.assertNotIn('old-input', json.dumps(result))
 
+    def test_initial_history_is_small_without_changing_pagination(self):
+        result = server.mobile_history_path('/api/session/ses_1/message?limit=50&order=desc')
+        self.assertIn('limit=15', result)
+        for path in ['/api/session/ses_1/message?limit=50&cursor=older', '/api/session/ses_1/message?limit=5&order=desc&type=assistant', '/api/session?limit=50&order=desc']:
+            self.assertEqual(server.mobile_history_path(path), path)
+
     def test_sse_stream_forwards_hints_not_other_sessions_or_content(self):
         own = json.dumps({'type': 'session.message.delta', 'data': {'sessionID': 'ses_own', 'text': 'private-own-text'}})
         other = json.dumps({'type': 'session.message.delta', 'data': {'sessionID': 'ses_other', 'text': 'private-other-text'}})

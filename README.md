@@ -2,12 +2,15 @@
 
 Native SwiftUI remote client for OpenCode V2. iOS 17+; no webview, no embedded terminal.
 
+**Instalação e uso em português:** [tutorial completo](docs/GUIA-PT-BR.md).
+
 ## Included
 
 - Existing sessions, new sessions in a notebook directory, paged history.
 - Native message composer, assistant text, tool status, interrupt action.
 - Explicit allow-once / deny controls for tool permissions.
-- Foreground refresh every 2 seconds, recovery after reconnect.
+- Session-scoped foreground SSE updates, periodic fallback and reconnect recovery.
+- Conversation-name search across server history, with pinned matches and pagination.
 - Remote keep-awake switch, matching notebook Polybar mode.
 - Per-chat Plan/Build switch, agent and model/variant selection, rename action.
 - Native Photos and Files pickers: images, PDF and UTF-8 text/source files.
@@ -50,7 +53,7 @@ awake and connected; mode cannot wake an already-suspended notebook.
 Actions. Produces `build/OpenCode-Pocket-unsigned.ipa`, not a signed/installed app.
 Use existing iLoader workflow to sign and install. Apple credentials go directly
 into iLoader, never source or GitHub Actions. Personal free signing typically
-requires renewal every 7 days. Distribution is private, not App Store/TestFlight.
+requires renewal every 7 days. Installation uses sideloading, not App Store/TestFlight.
 
 ## Notebook gateway
 

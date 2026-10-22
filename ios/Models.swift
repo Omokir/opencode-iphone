@@ -1,5 +1,15 @@
 import Foundation
 
+enum SessionSearch {
+    static func path(query: String, cursor: String? = nil) -> String {
+        var components = URLComponents()
+        components.path = "/api/session"
+        components.queryItems = [URLQueryItem(name: "limit", value: "30"), URLQueryItem(name: "archived", value: "false"), URLQueryItem(name: "parentID", value: "null"), URLQueryItem(name: "search", value: query.trimmingCharacters(in: .whitespacesAndNewlines))]
+        components.queryItems?.append(URLQueryItem(name: cursor == nil ? "order" : "cursor", value: cursor ?? "desc"))
+        return components.string!
+    }
+}
+
 enum RequestID {
     static func message() -> String {
         "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()

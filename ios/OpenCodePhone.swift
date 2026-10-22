@@ -102,12 +102,22 @@ struct SessionsView: View {
     @State private var quotaFailed = false
     @State private var quotaLoading = false
     @State private var quotaChecked = Date.distantPast
-    @State private var directory = "/home/omoki"
+    @State private var directory = ""
     @State private var pinsChecked = Date.distantPast
     @State private var pinLoadFailed = false
     @State private var loadedMore = false
+    @State private var searchText = ""
+    @State private var searchPresented = false
+    @State private var searchResults: [Session] = []
+    @State private var searchCursor: String?
+    @State private var searchBusy = false
+    @State private var searchError: String?
+    @State private var searchTicket = UUID()
+    var searching: Bool { !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    var displayedSessions: [Session] { searching ? searchResults : sessions }
+    var displayedPins: [String] { searching ? pinnedIDs.filter { id in searchResults.contains { $0.id == id } } : pinnedIDs }
     var pinnedIDs: [String] { pins.ids(server: api.server) }
-    var otherSessions: [Session] { sessions.filter { !pins.contains($0.id, server: api.server) } }
+    var otherSessions: [Session] { displayedSessions.filter { !pins.contains($0.id, server: api.server) } }
     var body: some View {
         NavigationStack(path: $path) {
             List {
@@ -136,10 +146,10 @@ struct SessionsView: View {
                     }
                     Text("Estado da conexão, autorização temporária e botão Parar.").font(.caption).foregroundStyle(.secondary)
                 }
-                if !pinnedIDs.isEmpty {
+                if !displayedPins.isEmpty {
                     Section("Fixadas") {
-                        ForEach(pinnedIDs, id: \.self) { id in
-                            if let session = sessions.first(where: { $0.id == id }) {
+                        ForEach(displayedPins, id: \.self) { id in
+                            if let session = displayedSessions.first(where: { $0.id == id }) {
                                 row(session, pinned: true)
                             } else if !busy {
                                 HStack {
@@ -156,17 +166,37 @@ struct SessionsView: View {
                     ForEach(otherSessions) { session in
                         row(session, pinned: false)
                     }
-                    if sessions.isEmpty && !busy { Text("Crie conversa ou puxe para atualizar.").foregroundStyle(.secondary) }
-                    if cursor != nil { Button("Carregar mais") { Task { await load(more: true) } }.disabled(busy) }
+                    if searching {
+                        if searchBusy { ProgressView("Buscando conversas…") }
+                        if let searchError { Text(searchError).foregroundStyle(.red) }
+                        if searchResults.isEmpty && !searchBusy && searchError == nil { Text("Nenhuma conversa encontrada.").foregroundStyle(.secondary) }
+                        if searchCursor != nil { Button("Mais resultados") { Task { await search(more: true) } }.disabled(searchBusy) }
+                    } else {
+                        if sessions.isEmpty && !busy { Text("Crie conversa ou puxe para atualizar.").foregroundStyle(.secondary) }
+                        if cursor != nil { Button("Carregar mais") { Task { await load(more: true) } }.disabled(busy) }
+                    }
                 }
             }
             .navigationTitle("Conversas")
+            .searchable(text: $searchText, isPresented: $searchPresented, placement: .navigationBarDrawer, prompt: "Nome da conversa")
+            .task(id: searchText) {
+                searchTicket = UUID()
+                searchBusy = false
+                searchResults = []
+                searchCursor = nil
+                searchError = nil
+                guard searching else { return }
+                searchBusy = true
+                do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                await search()
+            }
             .navigationDestination(for: Session.self) { ChatView(session: $0) }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     HStack(spacing: 16) {
                         Button("Ajustes", systemImage: "slider.horizontal.3") { settings = true }
                         Button("Arquivos do notebook", systemImage: "folder") { fileBrowser = true }
+                        Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) { Button("Nova conversa", systemImage: "square.and.pencil") { create = true } }
@@ -197,6 +227,26 @@ struct SessionsView: View {
     func row(_ session: Session, pinned: Bool) -> some View {
         ConversationRow(session: session, pinned: pinned, unread: unread.isUnread(session, server: api.server)) {
             pins.toggle(session.id, server: api.server)
+        }
+    }
+    func search(more: Bool = false) async {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        let ticket = UUID()
+        searchTicket = ticket
+        searchBusy = true
+        defer { if searchTicket == ticket { searchBusy = false } }
+        do {
+            let page: Page<Session> = try await api.request(SessionSearch.path(query: query, cursor: more ? searchCursor : nil))
+            try Task.checkCancellation()
+            guard searchTicket == ticket, query == searchText.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+            if more { searchResults += page.data.filter { item in !searchResults.contains { $0.id == item.id } } }
+            else { searchResults = page.data }
+            searchCursor = page.cursor?.next
+            searchError = nil
+        } catch {
+            guard searchTicket == ticket, !Task.isCancelled else { return }
+            searchError = "Busca indisponível: \(error.localizedDescription)"
         }
     }
     func load(more: Bool = false, resetPagination: Bool = false) async {

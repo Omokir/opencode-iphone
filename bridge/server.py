@@ -156,6 +156,23 @@ def mobile_messages(body):
     return json.dumps(value).encode()
 
 
+def mobile_history_path(path):
+    parsed = urllib.parse.urlsplit(path)
+    if not re.fullmatch(r'/api/session/ses[^/]+/message', parsed.path):
+        return path
+    query = urllib.parse.parse_qs(parsed.query)
+    # First screen/foreground reconciliation stays small. Cursor pagination
+    # and the explicit assistant-only live page retain their requested sizes.
+    if 'cursor' not in query and 'type' not in query and query.get('order') == ['desc']:
+        try:
+            if int(query.get('limit', ['50'])[0]) > 15:
+                query['limit'] = ['15']
+                return parsed.path + '?' + urllib.parse.urlencode(query, doseq=True)
+        except ValueError:
+            pass
+    return path
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # No URLs, prompts, tokens or response content in access logs.
@@ -318,7 +335,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {'awake': value})
             if self.command == 'POST' and path == '/api/session':
                 body = session_defaults(body)
-            status, result = upstream(self.command, self.path, body)
+            proxy_path = mobile_history_path(self.path) if self.command == 'GET' else self.path
+            status, result = upstream(self.command, proxy_path, body)
             if status == 200 and self.command == 'GET' and re.fullmatch(r'/api/session/ses[^/]+/message(?:/msg[^/]+)?', path):
                 result = mobile_messages(result)
             return self.reply(status, result)
