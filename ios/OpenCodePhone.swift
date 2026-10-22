@@ -208,6 +208,7 @@ struct ChatView: View {
     @State private var importing = false
     @State private var changingAgent = false
     @State private var controlPanel = false
+    @State private var question: QuestionForm?
     @State private var controlAllowed = false
     @State private var controlSummary = "Consultando automação…"
     @State private var controlCheck = Date.distantPast
@@ -284,6 +285,19 @@ struct ChatView: View {
                     Button("Fechar aviso") { store.sendError = nil }.font(.caption2)
                 }.padding(10)
             }
+            ForEach(store.questions) { form in
+                Button { question = form } label: {
+                    HStack {
+                        Image(systemName: "questionmark.bubble.fill")
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("A IA fez uma pergunta").font(.caption.weight(.semibold))
+                            Text(form.title).font(.subheadline).lineLimit(2)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                    }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Style.blue.opacity(0.08))
+                }.accessibilityLabel("Responder: \(form.title)")
+            }
             if !store.permissions.isEmpty {
                 ScrollView {
                     VStack(spacing: 1) {
@@ -345,6 +359,9 @@ struct ChatView: View {
         }
         .sheet(isPresented: $options) { ChatOptionsView(session: $session) }
         .sheet(isPresented: $controlPanel) { PhoneControlView() }
+        .sheet(item: $question) { form in
+            QuestionFormView(question: form, session: session) { Task { await store.refresh(api, session: session) } }
+        }
         .photosPicker(isPresented: $selectingPhotos, selection: $photos, maxSelectionCount: max(1, 5 - attachments.count), matching: .images, preferredItemEncoding: .compatible)
         .fileImporter(isPresented: $selectingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             Task {
@@ -379,7 +396,7 @@ struct ChatView: View {
             while !Task.isCancelled {
                 await store.refresh(api, session: session)
                 guard phase == .active && !Task.isCancelled else { return }
-                if store.error == nil, let snapshot = store.sessionSnapshot {
+                if store.error == nil && !options && !controlPanel && !selectingFiles && !selectingPhotos && question == nil, let snapshot = store.sessionSnapshot {
                     unread.markRead(snapshot, server: api.server)
                 }
                 if session.isPhoneControl && Date().timeIntervalSince(controlCheck) > 5 {

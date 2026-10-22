@@ -144,6 +144,21 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(self.request('/phone/control/start', body={})[0], 401)
         self.assertEqual(self.request('/phone/control/stop', body={})[0], 401)
 
+    def test_question_routes_forward_answers_but_not_form_creation(self):
+        self.assertTrue(server.allowed('GET', '/api/session/ses_123/form'))
+        self.assertTrue(server.allowed('POST', '/api/session/ses_123/form/form_1/reply'))
+        self.assertFalse(server.allowed('POST', '/api/session/ses_123/form'))
+        payload = {'answer': {'direction': 'plan'}}
+        with patch.object(server, 'upstream', return_value=(200, b'{}')) as upstream:
+            self.assertEqual(self.request('/api/session/ses_123/form/form_1/reply', 'test-token', payload)[0], 200)
+            self.assertEqual(json.loads(upstream.call_args.args[2]), payload)
+
+    def test_paused_control_cannot_resume_by_answering_form(self):
+        self.http.phone_control.save({'sessionID': 'ses_123', 'enabled': False, 'expiresAt': 0})
+        with patch.object(server, 'upstream') as upstream:
+            self.assertEqual(self.request('/api/session/ses_123/form/form_1/reply', 'test-token', {'answer': {'direction': 'plan'}})[0], 409)
+            upstream.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

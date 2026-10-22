@@ -73,7 +73,7 @@ struct Permission: Decodable, Identifiable {
     struct Source: Decodable { let id: String; let messageID: String }
 }
 
-indirect enum JSONValue: Codable {
+indirect enum JSONValue: Codable, Equatable {
     case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null
     init(from decoder: Decoder) throws {
         let value = try decoder.singleValueContainer()
@@ -99,6 +99,48 @@ indirect enum JSONValue: Codable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return (try? String(data: encoder.encode(self), encoding: .utf8)) ?? ""
+    }
+    var object: Any {
+        switch self {
+        case .string(let value): return value
+        case .number(let value): return value
+        case .bool(let value): return value
+        case .object(let value): return value.mapValues(\.object)
+        case .array(let value): return value.map(\.object)
+        case .null: return NSNull()
+        }
+    }
+}
+struct QuestionForm: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let fields: [Field]
+    struct Field: Decodable, Identifiable {
+        let key: String
+        let type: String
+        let title: String?
+        let description: String?
+        let required: Bool?
+        let hidden: Bool?
+        let when: [Condition]?
+        let options: [Option]?
+        let custom: Bool?
+        let placeholder: String?
+        let defaultValue: JSONValue?
+        var id: String { key }
+        enum CodingKeys: String, CodingKey {
+            case key, type, title, description, required, hidden, when, options, custom, placeholder
+            case defaultValue = "default"
+        }
+    }
+    struct Option: Decodable, Identifiable { let value: String; let label: String; let description: String?; var id: String { value } }
+    struct Condition: Decodable { let key: String; let op: String; let value: JSONValue }
+    func visible(_ field: Field, answers: [String: JSONValue]) -> Bool {
+        guard field.hidden != true else { return false }
+        return (field.when ?? []).allSatisfy { condition in
+            let equal = answers[condition.key] == condition.value
+            return condition.op == "eq" ? equal : condition.op == "neq" ? !equal : false
+        }
     }
 }
 struct Awake: Decodable { let awake: Bool }

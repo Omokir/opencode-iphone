@@ -23,6 +23,7 @@ import SwiftUI
              "capabilities": ["input": ["text", "image", "pdf"]], "variants": [], "status": "active"]
         ]
     ]
+    static let question = try! JSONDecoder().decode(QuestionForm.self, from: Data(#"{"id":"form_demo","title":"Como você quer continuar?","fields":[{"key":"direction","type":"string","title":"Próxima etapa","required":true,"custom":true,"options":[{"value":"plan","label":"Só planejar","description":"Revisar proposta antes de alterar arquivos."},{"value":"build","label":"Implementar","description":"Seguir com alterações aprovadas."}]}]}"#.utf8))
     static func response(_ path: String, method: String, body: [String: Any]?) throws -> Data {
         let route = String(path.split(separator: "?")[0])
         var result: [String: Any] = [:]
@@ -51,7 +52,8 @@ import SwiftUI
                 ["id": "msg_3", "type": "assistant", "time": ["created": 4, "completed": 5], "content": [],
                  "error": ["type": "provider.auth", "message": "Exemplo: chave do provedor expirou. Selecione outro modelo nos ajustes."]]
             ]]
-        } else if route.hasSuffix("/permission") {
+        } else if route.hasSuffix("/form") { result = ["data": []] }
+        else if route.hasSuffix("/permission") {
             result = ["data": [["id": "per_demo", "action": "iphone_mobile_launch_app", "resources": ["*"],
                                 "message": "Abrir Ajustes no iPhone", "source": ["id": "call_demo", "messageID": "msg_2"]]]]
         }
@@ -67,6 +69,7 @@ struct SnapshotRoot: View {
         if arguments.contains("--snapshot-chat") { NavigationStack { ChatView(session: session) } }
         else if arguments.contains("--snapshot-sessions") { SnapshotConversationsView() }
         else if arguments.contains("--snapshot-control") { PhoneControlView() }
+        else if arguments.contains("--snapshot-question") { QuestionFormView(question: Snapshot.question, session: session) { } }
         else if arguments.contains("--snapshot-options") { ChatOptionsView(session: $session) }
         else if arguments.contains("--snapshot-models") {
             let models = try! JSONDecoder().decode(Catalog.self, from: JSONSerialization.data(withJSONObject: Snapshot.catalog)).models

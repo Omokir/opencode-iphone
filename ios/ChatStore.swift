@@ -10,6 +10,7 @@ final class ChatStore: ObservableObject {
     @Published var sendError: String?
     @Published var permissionDetails: [String: String] = [:]
     @Published var sessionSnapshot: Session?
+    @Published var questions: [QuestionForm] = []
     @Published var loadingOlder = false
     @Published var olderCursor: String?
     @Published var refreshed = false
@@ -36,6 +37,8 @@ final class ChatStore: ObservableObject {
             }
             let requests: Page<Permission> = try await api.request("/api/session/\(session.id)/permission")
             permissions = requests.data
+            let questionsPage: Page<QuestionForm> = try await api.request("/api/session/\(session.id)/form")
+            questions = questionsPage.data
             for request in requests.data {
                 guard permissionDetails[request.id] == nil, let source = request.source else { continue }
                 var message = messages.first { $0.id == source.messageID }

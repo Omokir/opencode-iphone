@@ -23,10 +23,11 @@ ATTEMPTS = []
 MAX_BODY = 16 * 1024 * 1024
 RULES = {
     'GET': [r'/api/info', r'/api/session', r'/api/session/ses[^/]+',
-            r'/api/session/ses[^/]+/(message|permission)', r'/api/session/ses[^/]+/message/msg[^/]+',
+            r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
             r'/phone/status', r'/phone/catalog', r'/phone/control/status'],
     'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
-             r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/phone/mode', r'/phone/control/(start|stop)'],
+             r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
+             r'/phone/mode', r'/phone/control/(start|stop)'],
     'PATCH': [r'/api/session/ses[^/]+'],
 }
 
@@ -157,11 +158,11 @@ class Handler(BaseHTTPRequestHandler):
             session_match = re.match(r'/api/session/(ses[^/]+)', path)
             if session_match and control.is_control_session(session_match[1]):
                 payload = json.loads(body or b'{}') if self.command == 'POST' else {}
-                if path.endswith('/reply') and payload.get('decision') not in ('once', 'reject'):
+                if '/permission/' in path and path.endswith('/reply') and payload.get('decision') not in ('once', 'reject'):
                     return self.reply(403, {'error': 'Controle aceita apenas permitir uma vez ou negar.'})
                 if path.endswith('/agent') and payload.get('agent') not in ('build', 'plan'):
                     return self.reply(403, {'error': 'Conversa de controle usa apenas Build ou Plan.'})
-                if path.endswith('/prompt'):
+                if path.endswith('/prompt') or ('/form/' in path and path.endswith('/reply')):
                     state = control.state()
                     if state.get('enabled') is not True or state.get('expiresAt', 0) <= time.time():
                         return self.reply(409, {'error': 'Automação pausada ou expirada. Libere novamente no painel do iPhone.'})

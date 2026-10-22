@@ -59,7 +59,7 @@ saída de ferramentas ainda não estão incluídos.
 Compilação, assinatura, instalação e teste no aparelho são etapas diferentes.
 Um teste no simulador não comprova funcionamento no seu iPhone.
 
-## Atualização 0.3.1
+## Atualização 0.3.2
 
 - **Tela inicial:** bateria do notebook e bolinha de resposta não lida.
 - **Fotos:** seletor do sistema abre fora do menu de anexos.
@@ -68,6 +68,9 @@ Um teste no simulador não comprova funcionamento no seu iPhone.
 - **Parar:** permanece visível no painel e na conversa de controle. Bloqueia
   novas chamadas normais do MCP e solicita interrupção, sem desfazer ações.
 - **Envios:** falha não confirmada mantém texto/anexos, com aviso persistente.
+- **Perguntas da IA:** toque no cartão “A IA fez uma pergunta” para selecionar
+  opções ou digitar resposta no formulário nativo. Campos externos especiais
+  continuam exigindo interface do notebook.
 
 Bolinha atualiza com app ativo ou ao reabrir. Não há push; leitura é armazenada
 só neste iPhone e não altera indicadores do notebook. Histórico antigo não vira

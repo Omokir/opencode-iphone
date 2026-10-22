@@ -23,7 +23,9 @@ Native SwiftUI remote client for OpenCode V2. iOS 17+; no webview, no embedded t
 
 ## Limits
 
-No push notifications or interactive question forms yet. Attachments are limited
+Native question sheets support text/options, multiple selection, booleans and
+numbers, including conditional fields. External/custom field renderers still
+need notebook UI. No push notifications. Attachments are limited
 to 5 files, 4 MB each and 8 MB total; arbitrary binary archives are not supported.
 Photos are converted to JPEG and resized to at most 2048 px. File contents are
 sent through notebook to the selected model provider only when Send is tapped.
@@ -71,6 +73,11 @@ These fixtures are excluded from device IPA builds. No real chat contents,
 provider credentials, pairing codes or access tokens go to CI.
 
 Control scope, host gate and signing/runtime limitations: [PHONE-CONTROL.md](docs/PHONE-CONTROL.md).
+
+Optional local model integration test (may use provider credits):
+`python3 scripts/control-policy-smoke.py`. It overrides iPhone MCP only in a
+temporary isolated workspace, uses a fake device and verifies an unapproved
+launch is never executed. No physical iPhone is accessed by this test.
 
 ## Unread markers
 
