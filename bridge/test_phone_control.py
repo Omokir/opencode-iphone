@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -124,6 +125,29 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.controller.start()[0], 503)
         self.assertFalse(self.controller.state()['enabled'])
         self.assertEqual(self.controller.state()['sessionID'], 'ses_control')
+
+    def test_stop_wins_over_start_already_in_flight(self):
+        entered = threading.Event()
+        release = threading.Event()
+        original = self.controller.upstream
+        result = []
+        def slow_create(method, path, data):
+            if method == 'POST' and path == '/api/session':
+                entered.set()
+                release.wait(timeout=5)
+            return original(method, path, data)
+        self.controller.upstream = slow_create
+        thread = threading.Thread(target=lambda: result.append(self.controller.start()))
+        thread.start()
+        self.assertTrue(entered.wait(timeout=2))
+        try:
+            self.assertFalse(self.controller.stop()[1]['enabled'])
+            self.assertFalse(self.controller.state()['enabled'])
+        finally:
+            release.set()
+            thread.join(timeout=3)
+        self.assertEqual(result[0][0], 409)
+        self.assertFalse(self.controller.state()['enabled'])
 
 
 if __name__ == '__main__':

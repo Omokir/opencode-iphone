@@ -7,6 +7,7 @@ struct PhoneControlView: View {
     @State private var status: ControlStatus?
     @State private var path: [Session] = []
     @State private var busy = false
+    @State private var stopping = false
     @State private var consent = false
     @State private var error: String?
     @State private var fetchError: String?
@@ -50,7 +51,7 @@ struct PhoneControlView: View {
                 Section {
                     Button(status?.enabled == true ? "Renovar por 15 minutos e abrir tarefa" : "Liberar controle por 15 minutos") { consent = true }
                         .disabled(busy || status?.configured != true || status?.device.connected != true)
-                    Button("Parar automação", role: .destructive) { Task { await stop() } }.disabled(busy)
+                    Button("Parar automação", role: .destructive) { Task { await stop() } }.disabled(stopping)
                 } footer: {
                     Text("Parar bloqueia novas chamadas pelo MCP e solicita interrupção da conversa. Não desfaz ações já realizadas. Se perder conexão com notebook, parada não pode ser confirmada: bloqueie iPhone ou desconecte cabo.")
                 }
@@ -66,7 +67,12 @@ struct PhoneControlView: View {
             }
             .navigationTitle("Controlar iPhone").navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: Session.self) { ChatView(session: $0) }
-            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Fechar") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Fechar") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Parar", systemImage: "stop.circle.fill", role: .destructive) { Task { await stop() } }.disabled(stopping)
+                }
+            }
             .overlay { if busy { ProgressView() } }
             .confirmationDialog("Liberar leitura da tela por 15 minutos?", isPresented: $consent, titleVisibility: .visible) {
                 Button("Liberar e abrir tarefa") { Task { await start() } }
@@ -113,6 +119,9 @@ struct PhoneControlView: View {
         } catch { self.error = error.localizedDescription }
     }
     func stop() async {
+        guard !stopping else { return }
+        stopping = true
+        defer { stopping = false }
         busy = true
         do {
             let stopped: ControlStopped = try await api.request("/phone/control/stop", method: "POST", body: [:])

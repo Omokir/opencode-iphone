@@ -42,6 +42,8 @@ class PhoneControl:
         self.run = run
         self.clock = clock
         self.lock = threading.Lock()
+        self.epoch_lock = threading.Lock()
+        self.epoch = 0
         self.device_cache = None
         self.cached_at = 0
 
@@ -144,6 +146,8 @@ class PhoneControl:
 
     def start(self):
         with self.lock:
+            with self.epoch_lock:
+                epoch = self.epoch
             config = self.config()
             if not config:
                 return 409, {'error': 'Controle ainda não configurado no notebook.'}
@@ -171,7 +175,8 @@ class PhoneControl:
                 session_id = json.loads(session)['data']['id']
                 # Save ID before subsequent writes, so uncertain responses never
                 # blindly create duplicate control conversations.
-                self.save({'enabled': False, 'sessionID': session_id, 'expiresAt': 0})
+                with self.epoch_lock:
+                    self.save({'enabled': False, 'sessionID': session_id, 'expiresAt': 0})
                 status, data = self.upstream('POST', f'/api/session/{session_id}/synthetic',
                     json.dumps({'text': INSTRUCTIONS, 'description': 'Regras do controle do iPhone', 'resume': False}).encode())
                 if status != 200:
@@ -183,37 +188,43 @@ class PhoneControl:
                 json.dumps({'permissions': CONTROL_PERMISSIONS}).encode())
             if status not in (200, 204):
                 return status, data
-            self.save({'enabled': True, 'sessionID': session_id, 'expiresAt': self.clock() + 900})
+            with self.epoch_lock:
+                if epoch != self.epoch:
+                    return 409, {'error': 'Liberação cancelada por Parar. Automação continua pausada.'}
+                self.save({'enabled': True, 'sessionID': session_id, 'expiresAt': self.clock() + 900})
             return 200, json.loads(session)
 
     def stop(self):
-        with self.lock:
+        # Stop never waits for a slow start/network request. The epoch prevents
+        # a start already in flight from re-enabling automation afterward.
+        with self.epoch_lock:
+            self.epoch += 1
             state = self.state()
             state.update(enabled=False, expiresAt=0)
             self.save(state)  # Gate closes before trying to contact anything else.
-            warnings = []
-            session_id = state.get('sessionID')
-            def interrupt():
-                if not session_id:
-                    return
-                try:
-                    status, _ = self.upstream('POST', f'/api/session/{session_id}/interrupt', b'{}')
-                    if status not in (200, 204):
-                        warnings.append('Interrupção da tarefa não confirmada.')
-                    status, data = self.upstream('GET', f'/api/session/{session_id}/permission', None)
-                    requests = json.loads(data).get('data', []) if status == 200 else []
-                    if requests:
-                        self.upstream('POST', f'/api/session/{session_id}/permission/{requests[0]["id"]}/reply', b'{"decision":"reject"}')
-                except Exception:
-                    warnings.append('Notebook não confirmou interrupção da tarefa.')
-            worker = threading.Thread(target=interrupt, daemon=True)
-            worker.start()
+        warnings = []
+        session_id = state.get('sessionID')
+        def interrupt():
+            if not session_id:
+                return
             try:
-                self.command(['daemon', 'stop'], timeout=8)
+                status, _ = self.upstream('POST', f'/api/session/{session_id}/interrupt', b'{}')
+                if status not in (200, 204):
+                    warnings.append('Interrupção da tarefa não confirmada.')
+                status, data = self.upstream('GET', f'/api/session/{session_id}/permission', None)
+                requests = json.loads(data).get('data', []) if status == 200 else []
+                if requests:
+                    self.upstream('POST', f'/api/session/{session_id}/permission/{requests[0]["id"]}/reply', b'{"decision":"reject"}')
             except Exception:
-                warnings.append('Encerramento do agente não confirmado; novas chamadas MCP seguem bloqueadas.')
-            worker.join(timeout=0.5)
-            result_warnings = list(warnings)
-            if worker.is_alive():
-                result_warnings.append('Novas chamadas bloqueadas; interrupção da conversa ainda aguardando confirmação.')
-            return 200, {'enabled': False, 'warnings': result_warnings}
+                warnings.append('Notebook não confirmou interrupção da tarefa.')
+        worker = threading.Thread(target=interrupt, daemon=True)
+        worker.start()
+        try:
+            self.command(['daemon', 'stop'], timeout=8)
+        except Exception:
+            warnings.append('Encerramento do agente não confirmado; novas chamadas MCP seguem bloqueadas.')
+        worker.join(timeout=0.5)
+        result_warnings = list(warnings)
+        if worker.is_alive():
+            result_warnings.append('Novas chamadas bloqueadas; interrupção da conversa ainda aguardando confirmação.')
+        return 200, {'enabled': False, 'warnings': result_warnings}
