@@ -15,6 +15,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from phone_control import PhoneControl
 from battery import battery_status
+from codex_usage import CodexUsage
 
 STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
@@ -24,7 +25,7 @@ MAX_BODY = 16 * 1024 * 1024
 RULES = {
     'GET': [r'/api/info', r'/api/session', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
-            r'/phone/status', r'/phone/catalog', r'/phone/control/status'],
+            r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage'],
     'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
              r'/phone/mode', r'/phone/control/(start|stop)'],
@@ -149,6 +150,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(403, {'error': 'Route not available to mobile client'})
             body = self.rfile.read(length) if length else None
             control = self.server.phone_control
+            if path == '/phone/codex/usage':
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                return self.reply(200, self.server.codex_usage.get(refresh=query.get('refresh') == ['1']))
             if path == '/phone/control/status':
                 return self.reply(200, control.status())
             if path == '/phone/control/start':
@@ -202,5 +206,6 @@ if __name__ == '__main__':
     os.umask(0o077)
     server = ThreadingHTTPServer(('127.0.0.1', 49375), Handler)
     server.phone_control = PhoneControl(STATE, upstream)
+    server.codex_usage = CodexUsage()
     server.daemon_threads = True
     server.serve_forever()

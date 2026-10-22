@@ -155,6 +155,22 @@ struct HostStatus: Decodable {
         let state: String?
     }
 }
+struct CodexQuota: Decodable {
+    let available: Bool
+    let source: String
+    let checkedAt: Double
+    let accountLabel: String?
+    let plan: String?
+    let weekly: Window?
+    let shortWindow: Window?
+    let reason: String?
+    struct Window: Decodable {
+        let usedPercent: Double
+        let windowMinutes: Double
+        let resetsAt: Double?
+        var remainingPercent: Double { max(0, 100 - usedPercent) }
+    }
+}
 struct PairResponse: Decodable { let token: String }
 struct Accepted: Decodable { let data: AcceptedID; struct AcceptedID: Decodable { let id: String } }
 struct EmptyResponse: Decodable {}

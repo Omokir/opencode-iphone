@@ -40,6 +40,10 @@ import SwiftUI
                       "sessionID": "ses_demo", "device": ["connected": true, "agentInstalled": true, "name": "Meu iPhone"],
                       "running": true, "pending": 1, "activity": "Aguardando sua confirmação", "ready": true]
         }
+        else if route == "/phone/codex/usage" {
+            result = ["available": true, "source": "Codex CLI no notebook", "checkedAt": Date().timeIntervalSince1970,
+                      "accountLabel": "u***@example.invalid", "plan": "plus", "weekly": ["usedPercent": 36, "windowMinutes": 10080, "resetsAt": Date().timeIntervalSince1970 + 172800]]
+        }
         else if route == "/phone/status" { result = ["awake": true, "battery": ["available": true, "percentage": 46, "charging": true, "onAC": true, "state": "Charging"]] }
         else if route == "/api/session" { result = ["data": [object]] }
         else if route.hasSuffix("/message") {

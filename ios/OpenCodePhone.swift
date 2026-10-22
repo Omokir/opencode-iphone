@@ -93,6 +93,10 @@ struct SessionsView: View {
     @State private var hostStatus: HostStatus?
     @State private var hostChecked: Date?
     @State private var hostStatusFailed = false
+    @State private var codexQuota: CodexQuota?
+    @State private var quotaFailed = false
+    @State private var quotaLoading = false
+    @State private var quotaChecked = Date.distantPast
     @State private var directory = "/home/omoki"
     var body: some View {
         NavigationStack(path: $path) {
@@ -109,6 +113,11 @@ struct SessionsView: View {
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 Section {
                     HostBatteryView(status: hostStatus, stale: hostStatusFailed || api.reachable == false || (hostChecked.map { Date().timeIntervalSince($0) > 15 } ?? false))
+                }
+                Section {
+                    CodexQuotaView(quota: codexQuota, failed: quotaFailed || api.reachable == false || Date().timeIntervalSince(quotaChecked) > 120 && codexQuota != nil, loading: quotaLoading) {
+                        Task { await loadQuota(refresh: true) }
+                    }
                 }
                 Section {
                     Button { phoneControl = true } label: {
@@ -148,7 +157,10 @@ struct SessionsView: View {
             .task(id: phase) {
                 guard phase == .active else { return }
                 while !Task.isCancelled {
-                    if path.isEmpty && !settings && !phoneControl { await load() }
+                    if path.isEmpty && !settings && !phoneControl {
+                        await load()
+                        if Date().timeIntervalSince(quotaChecked) > 60 { await loadQuota() }
+                    }
                     do { try await Task.sleep(for: .seconds(5)) } catch { break }
                 }
             }
@@ -189,6 +201,17 @@ struct SessionsView: View {
             sessions.insert(response.data, at: 0)
             path.append(response.data)
         } catch { self.error = error.localizedDescription }
+    }
+    func loadQuota(refresh: Bool = false) async {
+        guard !quotaLoading else { return }
+        quotaLoading = true
+        defer { quotaLoading = false }
+        do {
+            codexQuota = try await api.request("/phone/codex/usage" + (refresh ? "?refresh=1" : ""))
+            quotaChecked = Date()
+            quotaFailed = false
+        } catch let failure as URLError where failure.code == .cancelled { }
+        catch { quotaFailed = true; quotaChecked = Date() }
     }
 }
 

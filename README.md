@@ -18,6 +18,8 @@ Native SwiftUI remote client for OpenCode V2. iOS 17+; no webview, no embedded t
   automatic foreground refresh, no push/background delivery claim.
 - Notebook battery on conversation list: percentage, charging/AC and low-battery
   warning, with unavailable/stale states rather than a fabricated reading.
+- Codex weekly quota from local authenticated app-server read-only API, with
+  reset time and explicit account/source scope. No message-count estimate.
 - HTTPS over private Tailscale network; one-time, five-minute pairing code.
 - Device-only Keychain token storage; no provider or Apple credentials in app.
 
@@ -87,3 +89,17 @@ active conversation. Opening and successfully loading the chat clears the dot.
 State persists on this iPhone only; desktop read markers are not modified.
 No polling is promised while iOS suspends the app. The list refreshes while
 foregrounded and on return, without automatically replaying failed sends.
+
+## Codex quota
+
+The notebook launches a bounded, stdio-only `codex app-server` client and calls
+only initialize, account/read (refreshToken=false), account/rateLimits/read.
+No thread/turn, login, purchase or reset-credit action is started. It returns
+only masked account label and sanitized quota windows; no tokens or account
+response body reaches the phone or logs. Results cache for 60 seconds (manual
+refresh is throttled to at least 10 seconds).
+
+A weekly window is recognized by its supplied 10080-minute duration, not by
+whether it is named primary/secondary. Missing data is unavailable, not zero.
+These are limits of the ChatGPT account connected to Codex CLI on notebook;
+they are not API balance and may differ from the account used by a chat model.

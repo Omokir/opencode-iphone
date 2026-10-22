@@ -59,9 +59,12 @@ saída de ferramentas ainda não estão incluídos.
 Compilação, assinatura, instalação e teste no aparelho são etapas diferentes.
 Um teste no simulador não comprova funcionamento no seu iPhone.
 
-## Atualização 0.3.2
+## Atualização 0.3.3
 
 - **Tela inicial:** bateria do notebook e bolinha de resposta não lida.
+- **Codex semanal:** percentual disponível/usado e próxima renovação, quando
+  informados pela conta conectada ao Codex CLI no notebook. Não é saldo de API
+  nem comprovação de que modelo do chat usa mesma conta.
 - **Fotos:** seletor do sistema abre fora do menu de anexos.
 - **Controlar meu iPhone:** painel com conexão, autorização de 15 minutos e
   conversa dedicada. Cada ação mutável pede revisão e confirmação individual.

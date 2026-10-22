@@ -65,6 +65,8 @@ struct ModelsTest {
         precondition(question.visible(question.fields[1], answers: ["confirm": .bool(true)]))
         precondition(question.fields[1].options?[0].value == "plan")
         precondition((JSONValue.array([.string("plan")]).object as? [String]) == ["plan"])
+        let quota = try decoder.decode(CodexQuota.self, from: Data(#"{"available":true,"source":"Codex CLI","checkedAt":1000,"weekly":{"usedPercent":36,"windowMinutes":10080,"resetsAt":2000}}"#.utf8))
+        precondition(quota.weekly?.remainingPercent == 64)
         print("PASS: native model decoding, pagination, tool status, permissions, message IDs")
         print("PASS: unread completion marker, read clearing, persistence, server isolation and running-session exclusion")
         print("PASS: model variants, catalog, attachment URIs/limits, provider errors")

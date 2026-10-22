@@ -19,6 +19,7 @@ class GatewayTests(unittest.TestCase):
         server.ATTEMPTS.clear()
         self.http = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
         self.http.phone_control = server.PhoneControl(self.state, lambda *args: server.upstream(*args))
+        self.http.codex_usage = server.CodexUsage(reader=lambda: {'account': None})
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
 
@@ -143,6 +144,14 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(self.request('/phone/control/status')[0], 401)
         self.assertEqual(self.request('/phone/control/start', body={})[0], 401)
         self.assertEqual(self.request('/phone/control/stop', body={})[0], 401)
+        self.assertEqual(self.request('/phone/codex/usage')[0], 401)
+
+    def test_codex_quota_endpoint_is_readonly_and_sanitized(self):
+        status, body = self.request('/phone/codex/usage', 'test-token')
+        self.assertEqual(status, 200)
+        self.assertFalse(body['available'])
+        self.assertIsNone(body['weekly'])
+        self.assertFalse(server.allowed('POST', '/phone/codex/usage'))
 
     def test_question_routes_forward_answers_but_not_form_creation(self):
         self.assertTrue(server.allowed('GET', '/api/session/ses_123/form'))
