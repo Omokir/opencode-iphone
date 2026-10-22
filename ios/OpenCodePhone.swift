@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 
 enum Style {
     static let ink = Color(red: 0.11, green: 0.17, blue: 0.25)
@@ -12,7 +14,11 @@ struct OpenCodePhoneApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
+                #if SNAPSHOT
+                SnapshotRoot()
+                #else
                 if api.connected { SessionsView() } else { ConnectView() }
+                #endif
             }
             .environmentObject(api)
             .tint(Style.blue)
@@ -32,7 +38,7 @@ struct ConnectView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("[oc]").font(.system(size: 52, weight: .bold, design: .monospaced)).foregroundStyle(Style.blue)
-                        Text("Seu notebook.\nNo seu bolso.").font(.system(.largeTitle, design: .rounded, weight: .bold))
+                        Text("Seu notebook.\nNo seu bolso.").font(.system(.largeTitle, design: .rounded, weight: .bold)).fixedSize(horizontal: false, vertical: true)
                         Text("As conversas e ferramentas continuam no notebook. Este app é seu controle remoto.")
                             .foregroundStyle(.secondary)
                     }.padding(.vertical, 20)
@@ -111,6 +117,7 @@ struct SessionsView: View {
             .overlay { if busy && sessions.isEmpty { ProgressView() } }
             .refreshable { await load() }
             .task { await load() }
+            .onChange(of: path.count) { _, count in if count == 0 { Task { await load() } } }
             .sheet(isPresented: $settings) { SettingsView() }
             .alert("Nova conversa", isPresented: $create) {
                 TextField("Pasta no notebook", text: $directory).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -146,12 +153,40 @@ struct SessionsView: View {
 struct ChatView: View {
     @EnvironmentObject var api: API
     @Environment(\.scenePhase) var phase
-    let session: Session
+    @State private var session: Session
     @StateObject private var store = ChatStore()
     @State private var draft = ""
     @State private var stop = false
+    @State private var options = false
+    @State private var selectingFiles = false
+    @State private var photos: [PhotosPickerItem] = []
+    @State private var attachments: [PendingFile] = []
+    @State private var importing = false
+    @State private var changingAgent = false
+    init(session: Session) {
+        _session = State(initialValue: session)
+        #if SNAPSHOT
+        _attachments = State(initialValue: [PendingFile(name: "requisitos.txt", mime: "text/plain", data: Data("Projeto de exemplo".utf8))])
+        #endif
+    }
     var body: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                ForEach(["plan", "build"], id: \.self) { agent in
+                    Button {
+                        Task { await switchAgent(agent) }
+                    } label: {
+                        Label(agent.capitalized, systemImage: agent == "plan" ? "list.bullet.clipboard" : "hammer")
+                            .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(session.agent == agent ? Style.blue.opacity(0.12) : Color.clear, in: Capsule())
+                    }.disabled(changingAgent || store.sending)
+                        .accessibilityAddTraits(session.agent == agent ? .isSelected : [])
+                }
+                Spacer(minLength: 0)
+                Button { options = true } label: {
+                    Text(session.model?.id ?? "Modelo").font(.system(.caption, design: .monospaced)).lineLimit(1)
+                }.accessibilityLabel("Selecionar modelo e ajustar conversa")
+            }.padding(.horizontal).padding(.vertical, 6).background(.bar)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 20) {
@@ -191,20 +226,82 @@ struct ChatView: View {
                     }
                 }.padding().background(Color.orange.opacity(0.12))
             }
+            if !attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(attachments) { file in
+                            HStack(spacing: 6) {
+                                Image(systemName: file.category == "image" ? "photo" : "doc")
+                                Text(file.name).lineLimit(1)
+                                Text(ByteCountFormatter.string(fromByteCount: Int64(file.data.count), countStyle: .file)).foregroundStyle(.secondary)
+                                Button { attachments.removeAll { $0.id == file.id } } label: { Image(systemName: "xmark.circle.fill") }
+                                    .accessibilityLabel("Remover \(file.name)").disabled(store.sending)
+                            }.font(.caption).padding(10).background(Style.paper, in: Capsule())
+                        }
+                    }.padding(.horizontal).padding(.top, 8)
+                }
+            }
             HStack(alignment: .bottom, spacing: 12) {
+                Menu {
+                    Button("Arquivos", systemImage: "folder") { selectingFiles = true }
+                    PhotosPicker(selection: $photos, maxSelectionCount: max(1, 5 - attachments.count), matching: .images, photoLibrary: .shared()) {
+                        Label("Fotos", systemImage: "photo")
+                    }
+                } label: {
+                    Image(systemName: importing ? "hourglass" : "plus.circle").font(.system(size: 28)).padding(.bottom, 4)
+                }.disabled(importing || store.sending || attachments.count >= 5).accessibilityLabel("Anexar fotos ou arquivos")
                 TextField("Peça algo ao OpenCode…", text: $draft, axis: .vertical)
                     .lineLimit(1...6).padding(12).background(Style.paper, in: RoundedRectangle(cornerRadius: 16))
                 Button {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    Task { if await store.send(api, session: session, text: text), draft.trimmingCharacters(in: .whitespacesAndNewlines) == text { draft = "" } }
+                    let submitted = attachments
+                    Task {
+                        if await store.send(api, session: session, text: text, files: submitted) {
+                            if draft.trimmingCharacters(in: .whitespacesAndNewlines) == text { draft = "" }
+                            attachments.removeAll { file in submitted.contains { $0.id == file.id } }
+                        }
+                    }
                 } label: {
                     Image(systemName: store.sending ? "ellipsis" : "arrow.up.circle.fill").font(.system(size: 36))
-                }.disabled(store.sending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.disabled(store.sending || importing || changingAgent || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty))
                     .accessibilityLabel("Enviar mensagem")
             }.padding().background(.bar)
         }
         .navigationTitle(session.title ?? "Conversa").navigationBarTitleDisplayMode(.inline)
-        .toolbar { Button("Interromper", systemImage: "stop.circle") { stop = true } }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Nome, modo e modelo", systemImage: "slider.horizontal.3") { options = true }
+                    Button("Interromper tarefa", systemImage: "stop.circle", role: .destructive) { stop = true }
+                } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Opções da conversa")
+            }
+        }
+        .sheet(isPresented: $options) { ChatOptionsView(session: $session) }
+        .fileImporter(isPresented: $selectingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            Task {
+                importing = true
+                defer { importing = false }
+                do {
+                    for url in try result.get() {
+                        let file = try await Task.detached(priority: .userInitiated) { try FileLoader.read(url) }.value
+                        try append(file)
+                    }
+                } catch { store.error = error.localizedDescription }
+            }
+        }
+        .onChange(of: photos) { _, selection in
+            guard !selection.isEmpty else { return }
+            Task {
+                importing = true
+                defer { importing = false; photos = [] }
+                do {
+                    for item in selection {
+                        guard let data = try await item.loadTransferable(type: Data.self) else { throw PhoneError.message("Não foi possível carregar foto.") }
+                        try append(FileLoader.photo(data, index: attachments.count + 1))
+                    }
+                } catch { store.error = error.localizedDescription }
+            }
+        }
         .confirmationDialog("Interromper tarefa no notebook?", isPresented: $stop) {
             Button("Interromper", role: .destructive) { Task { await store.interrupt(api, session: session) } }
         }
@@ -215,6 +312,22 @@ struct ChatView: View {
                 do { try await Task.sleep(for: .seconds(store.error == nil ? 2 : 5)) } catch { break }
             }
         }
+    }
+    func append(_ file: PendingFile) throws {
+        try PendingFile.validate(attachments + [file])
+        attachments.append(file)
+        store.error = nil
+    }
+    func switchAgent(_ agent: String) async {
+        guard agent != session.agent else { return }
+        changingAgent = true
+        defer { changingAgent = false }
+        do {
+            let _: EmptyResponse = try await api.request("/api/session/\(session.id)/agent", method: "POST", body: ["agent": agent])
+            let updated: Item<Session> = try await api.request("/api/session/\(session.id)")
+            session = updated.data
+            store.error = nil
+        } catch { store.error = error.localizedDescription }
     }
 }
 
@@ -228,6 +341,14 @@ struct MessageView: View {
                 if message.type == "assistant" && message.time.completed == nil { ProgressView().controlSize(.mini).accessibilityLabel("Em execução") }
             }
             if let text = message.text { Text(text).textSelection(.enabled) }
+            if let failure = message.error {
+                Label(failure.message ?? "Modelo não conseguiu responder. Confira conta e modelo nos ajustes do chat.", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red).textSelection(.enabled)
+            }
+            ForEach(Array((message.files ?? []).enumerated()), id: \.offset) { _, file in
+                Label(file.name ?? file.mime, systemImage: file.mime.hasPrefix("image/") ? "photo" : "paperclip")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             ForEach(Array((message.content ?? []).enumerated()), id: \.offset) { _, part in
                 if part.type == "text", let text = part.text {
                     Text(.init(text)).textSelection(.enabled)

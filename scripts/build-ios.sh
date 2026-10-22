@@ -8,7 +8,7 @@ xcrun --sdk iphoneos swiftc -swift-version 5 -parse-as-library -O \
   -target arm64-apple-ios17.0 -sdk "$SDK" \
   -framework SwiftUI -framework UIKit -framework Security \
   -Xlinker -rpath -Xlinker @executable_path/Frameworks \
-  ios/Models.swift ios/API.swift ios/ChatStore.swift ios/OpenCodePhone.swift \
+  ios/*.swift \
   -o "$APP/OpenCodePocket"
 cp ios/Info.plist "$APP/Info.plist"
 python3 scripts/icon.py "$APP"

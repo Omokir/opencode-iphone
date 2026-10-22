@@ -9,12 +9,20 @@ Native SwiftUI remote client for OpenCode V2. iOS 17+; no webview, no embedded t
 - Explicit allow-once / deny controls for tool permissions.
 - Foreground refresh every 2 seconds, recovery after reconnect.
 - Remote keep-awake switch, matching notebook Polybar mode.
+- Per-chat Plan/Build switch, agent and model/variant selection, rename action.
+- Native Photos and Files pickers: images, PDF and UTF-8 text/source files.
+- Visible provider errors, attachment history and bounded uploads.
 - HTTPS over private Tailscale network; one-time, five-minute pairing code.
 - Device-only Keychain token storage; no provider or Apple credentials in app.
 
 ## Limits
 
-No push notifications, attachments, model switcher or interactive question forms yet.
+No push notifications or interactive question forms yet. Attachments are limited
+to 5 files, 4 MB each and 8 MB total; arbitrary binary archives are not supported.
+Photos are converted to JPEG and resized to at most 2048 px. File contents are
+sent through notebook to the selected model provider only when Send is tapped.
+Choose a model that supports the attachment type. Listed models are enabled in
+OpenCode, not necessarily authenticated or funded; choosing one may incur costs.
 Tool output details remain available on notebook. Work continues on notebook when
 app is backgrounded; foreground fetch resumes when reopened. Notebook must stay
 awake and connected; mode cannot wake an already-suspended notebook.
@@ -49,3 +57,7 @@ outside repository, private to user, never committed. Rate limit: 5 attempts/min
 `python3 scripts/validate-ipa.py build/OpenCode-Pocket-unsigned.ipa`
 
 Build, signing, installation, and launch are separate verification stages.
+
+Simulator screenshots use synthetic fixtures compiled with `-D SNAPSHOT`.
+These fixtures are excluded from device IPA builds. No real chat contents,
+provider credentials, pairing codes or access tokens go to CI.

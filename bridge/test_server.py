@@ -27,19 +27,20 @@ class GatewayTests(unittest.TestCase):
         self.patch.stop()
         self.temp.cleanup()
 
-    def request(self, path, token=None, body=None, origin=None):
+    def request(self, path, token=None, body=None, origin=None, method=None):
         headers = {'Content-Type': 'application/json'}
         if token:
             headers['Authorization'] = 'Bearer ' + token
         if origin:
             headers['Origin'] = origin
         req = urllib.request.Request(f'http://127.0.0.1:{self.http.server_port}' + path,
-            data=json.dumps(body).encode() if body is not None else None, headers=headers)
+            data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
         try:
             r = urllib.request.urlopen(req)
         except urllib.error.HTTPError as error:
             r = error
-        return r.status, json.loads(r.read())
+        with r:
+            return r.status, json.loads(r.read())
 
     def test_authentication_required(self):
         self.assertEqual(self.request('/api/info')[0], 401)
@@ -75,6 +76,56 @@ class GatewayTests(unittest.TestCase):
         self.assertTrue(server.allowed('POST', '/api/session/ses_123/prompt'))
         self.assertFalse(server.allowed('DELETE', '/api/session/ses_123'))
         self.assertFalse(server.allowed('POST', '/api/session/ses_123/shell'))
+
+    def test_mobile_session_uses_configured_model(self):
+        model = {'providerID': 'example', 'id': 'working-model'}
+        (self.state / 'defaults.json').write_text(json.dumps({'model': model, 'agent': 'build'}))
+        payload = json.loads(server.session_defaults(b'{"location":{"directory":"/workspace"}}'))
+        self.assertEqual(payload['model'], model)
+        self.assertEqual(payload['agent'], 'build')
+        self.assertEqual(payload['location']['directory'], '/workspace')
+
+    def test_explicit_model_is_not_overwritten(self):
+        (self.state / 'defaults.json').write_text(json.dumps({'model': {'id': 'fallback', 'providerID': 'example'}}))
+        payload = json.loads(server.session_defaults(b'{"model":{"id":"chosen","providerID":"example"}}'))
+        self.assertEqual(payload['model']['id'], 'chosen')
+
+    def test_chat_controls_allowlisted_without_global_config(self):
+        for action in ['agent', 'model']:
+            self.assertTrue(server.allowed('POST', '/api/session/ses_123/' + action))
+        self.assertTrue(server.allowed('PATCH', '/api/session/ses_123'))
+        self.assertFalse(server.allowed('PATCH', '/api/config'))
+
+    def test_rename_cannot_change_permissions_or_archive(self):
+        for payload in [{'title': ''}, {'title': 'x' * 201}, {'title': 'OK', 'permissions': []}, {'archived': True}]:
+            self.assertEqual(self.request('/api/session/ses_123', 'test-token', payload, method='PATCH')[0], 400)
+        with patch.object(server, 'upstream', return_value=(204, b'')) as upstream:
+            # The 204 body is empty, so inspect the wire directly rather than JSON helper.
+            request = urllib.request.Request(f'http://127.0.0.1:{self.http.server_port}/api/session/ses_123',
+                data=b'{"title":" Renamed "}', method='PATCH', headers={'Authorization': 'Bearer test-token'})
+            with urllib.request.urlopen(request) as response:
+                self.assertEqual(response.status, 204)
+            self.assertEqual(json.loads(upstream.call_args.args[2]), {'title': 'Renamed'})
+
+    def test_catalog_strips_provider_secrets_and_agent_prompts(self):
+        models = {'data': [{'id': 'm', 'providerID': 'p', 'name': 'Model', 'enabled': True, 'status': 'active',
+            'headers': {'Authorization': 'private'}, 'settings': {'apiKey': 'private'},
+            'capabilities': {'input': ['image', 'text'], 'tools': True},
+            'variants': [{'id': 'high', 'settings': {'private': True}}]}]}
+        agents = {'data': [{'id': 'build', 'name': 'Build', 'mode': 'primary', 'hidden': False, 'system': 'private'},
+                           {'id': 'secret', 'name': 'Secret', 'mode': 'primary', 'hidden': True}]}
+        with patch.object(server, 'upstream', side_effect=[(200, json.dumps(models).encode()), (200, json.dumps(agents).encode())]):
+            status, catalog = server.catalog('/workspace')
+        self.assertEqual(status, 200)
+        self.assertNotIn('private', json.dumps(catalog))
+        self.assertEqual(catalog['agents'], [{'id': 'build', 'name': 'Build'}])
+        self.assertEqual(catalog['models'][0]['variants'], [{'id': 'high'}])
+
+    def test_attachments_pass_through_without_logging_or_rewriting(self):
+        payload = {'text': 'Read attached text', 'files': [{'uri': 'data:text/plain;base64,aGk=', 'name': 'example.txt'}]}
+        with patch.object(server, 'upstream', return_value=(200, b'{"data":{"id":"input"}}')) as upstream:
+            self.assertEqual(self.request('/api/session/ses_123/prompt', 'test-token', payload)[0], 200)
+            self.assertEqual(json.loads(upstream.call_args.args[2]), payload)
 
 
 if __name__ == '__main__':

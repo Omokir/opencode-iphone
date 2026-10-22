@@ -18,11 +18,13 @@ STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
 PAIR_LOCK = threading.Lock()
 ATTEMPTS = []
+MAX_BODY = 16 * 1024 * 1024
 RULES = {
     'GET': [r'/api/info', r'/api/session', r'/api/session/ses[^/]+',
-            r'/api/session/ses[^/]+/(message|permission)', r'/phone/status'],
-    'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt)',
+            r'/api/session/ses[^/]+/(message|permission)', r'/phone/status', r'/phone/catalog'],
+    'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/phone/mode'],
+    'PATCH': [r'/api/session/ses[^/]+'],
 }
 
 
@@ -32,6 +34,17 @@ def allowed(method, path):
 
 def secret():
     return (STATE / 'token.secret').read_text().strip()
+
+
+def session_defaults(body):
+    payload = json.loads(body or b'{}')
+    file = STATE / 'defaults.json'
+    if file.exists():
+        defaults = json.loads(file.read_text())
+        for key in ('agent', 'model'):
+            if key in defaults and not payload.get(key):
+                payload[key] = defaults[key]
+    return json.dumps(payload).encode()
 
 
 def pair(code):
@@ -69,6 +82,33 @@ def upstream(method, path, data):
         return error.code, error.read()
 
 
+def catalog(directory):
+    if not directory.startswith('/') or len(directory) > 4096:
+        raise ValueError('Invalid directory')
+    query = '?' + urllib.parse.urlencode({'location[directory]': directory})
+    result = {}
+    # Only expose display metadata, never provider headers/settings or agent prompts.
+    for kind in ('model', 'agent'):
+        status, body = upstream('GET', '/api/' + kind + query, None)
+        if status != 200:
+            return status, body
+        records = json.loads(body)['data']
+        if kind == 'model':
+            result['models'] = [
+                {key: record[key] for key in ('id', 'providerID', 'name', 'capabilities', 'variants', 'status')}
+                for record in records if record.get('enabled') and record.get('status') != 'deprecated'
+            ]
+            for record in result['models']:
+                record['capabilities'] = {'input': record['capabilities'].get('input', [])}
+                record['variants'] = [{'id': variant['id']} for variant in record['variants']]
+        else:
+            result['agents'] = [
+                {key: record[key] for key in ('id', 'name')}
+                for record in records if not record.get('hidden') and record.get('mode') in ('primary', 'all')
+            ]
+    return 200, result
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # No URLs, prompts, tokens or response content in access logs.
@@ -90,10 +130,12 @@ class Handler(BaseHTTPRequestHandler):
             if not self.path.startswith('/') or '%' in path or '..' in path:
                 return self.reply(400, {'error': 'Invalid path'})
             length = int(self.headers.get('Content-Length', '0'))
-            if not 0 <= length <= 262144 or self.headers.get('Transfer-Encoding'):
+            if not 0 <= length <= MAX_BODY or self.headers.get('Transfer-Encoding'):
                 return self.reply(413, {'error': 'Request too large'})
             self.connection.settimeout(10)
             if path == '/pair' and self.command == 'POST':
+                if length > 1024:
+                    return self.reply(413, {'error': 'Pairing request too large'})
                 body = self.rfile.read(length)
                 return self.reply(*pair(json.loads(body).get('code', '')))
             auth = self.headers.get('Authorization', '')
@@ -102,6 +144,14 @@ class Handler(BaseHTTPRequestHandler):
             if not allowed(self.command, path):
                 return self.reply(403, {'error': 'Route not available to mobile client'})
             body = self.rfile.read(length) if length else None
+            if path == '/phone/catalog':
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                return self.reply(*catalog(query.get('directory', [str(Path.home())])[0]))
+            if self.command == 'PATCH':
+                payload = json.loads(body or b'{}')
+                if set(payload) != {'title'} or not isinstance(payload['title'], str) or not 1 <= len(payload['title'].strip()) <= 200:
+                    return self.reply(400, {'error': 'Nome deve ter entre 1 e 200 caracteres.'})
+                body = json.dumps({'title': payload['title'].strip()}).encode()
             if path == '/phone/status':
                 active = subprocess.run(['systemctl', '--user', 'is-active', '--quiet',
                                          'opencode-phone-mode.service']).returncode == 0
@@ -113,6 +163,8 @@ class Handler(BaseHTTPRequestHandler):
                 subprocess.run(['systemctl', '--user', 'start' if value else 'stop',
                                 'opencode-phone-mode.service'], check=True, timeout=15)
                 return self.reply(200, {'awake': value})
+            if self.command == 'POST' and path == '/api/session':
+                body = session_defaults(body)
             return self.reply(*upstream(self.command, self.path, body))
         except (ValueError, TypeError, json.JSONDecodeError):
             self.reply(400, {'error': 'Invalid request'})
@@ -121,6 +173,7 @@ class Handler(BaseHTTPRequestHandler):
 
     do_GET = handle_request
     do_POST = handle_request
+    do_PATCH = handle_request
 
 
 if __name__ == '__main__':

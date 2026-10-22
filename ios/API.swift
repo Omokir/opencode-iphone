@@ -65,6 +65,9 @@ final class API: ObservableObject {
 
     func request<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil,
                                authenticated: Bool = true) async throws -> T {
+        #if SNAPSHOT
+        return try JSONDecoder().decode(T.self, from: Snapshot.response(path, method: method, body: body))
+        #else
         let base = try Self.validate(server).absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: base + path) else { throw PhoneError.message("Endereço inválido.") }
         var request = URLRequest(url: url)
@@ -79,11 +82,13 @@ final class API: ObservableObject {
         guard let http = response as? HTTPURLResponse else { throw PhoneError.message("Resposta inválida.") }
         guard (200..<300).contains(http.statusCode) else {
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            let message = object?["error"] as? String ?? "Notebook respondeu HTTP \(http.statusCode)."
+            let nested = object?["error"] as? [String: Any]
+            let message = object?["message"] as? String ?? object?["error"] as? String ?? nested?["message"] as? String ?? "Notebook respondeu HTTP \(http.statusCode)."
             throw PhoneError.message(message)
         }
         let payload = data.isEmpty ? Data("{}".utf8) : data
         return try JSONDecoder().decode(T.self, from: payload)
+        #endif
     }
 
     func pair(server address: String, code: String) async throws {

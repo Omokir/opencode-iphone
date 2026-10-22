@@ -11,7 +11,7 @@ final class ChatStore: ObservableObject {
     @Published var olderCursor: String?
     @Published var refreshed = false
     private var pendingID: String?
-    private var pendingText: String?
+    private var pendingFingerprint: Data?
     private var newest: [Message] = []
     private var older: [Message] = []
 
@@ -39,19 +39,33 @@ final class ChatStore: ObservableObject {
         catch { self.error = error.localizedDescription }
     }
 
-    func send(_ api: API, session: Session, text: String) async -> Bool {
+    func send(_ api: API, session: Session, text: String, files: [PendingFile] = []) async -> Bool {
         guard !sending else { return false }
         sending = true
         defer { sending = false }
-        if pendingText != text || pendingID == nil {
-            pendingID = RequestID.message()
-            pendingText = text
-        }
         do {
+            try PendingFile.validate(files)
+            if !files.isEmpty, let model = session.model {
+                let catalog: Catalog = try await api.request("/phone/catalog?directory=" + API.escape(session.location.directory))
+                if let selected = catalog.models.first(where: { $0.key == model.key }) {
+                    let unsupported = files.filter { !selected.capabilities.input.contains($0.category) }
+                    if !unsupported.isEmpty {
+                        throw PhoneError.message("Modelo selecionado não aceita estes anexos: \(unsupported.map(\.name).joined(separator: ", ")). Selecione modelo com suporte a \(Set(unsupported.map(\.category)).sorted().joined(separator: ", ")).")
+                    }
+                }
+            }
+            let content: [String: Any] = ["text": text, "files": files.map(\.payload)]
+            let fingerprint = try JSONSerialization.data(withJSONObject: content, options: [.sortedKeys])
+            if pendingFingerprint != fingerprint || pendingID == nil {
+                pendingID = RequestID.message()
+                pendingFingerprint = fingerprint
+            }
+            var body = content
+            body["id"] = pendingID!
             let _: Accepted = try await api.request("/api/session/\(session.id)/prompt", method: "POST",
-                                                  body: ["id": pendingID!, "text": text])
+                                                  body: body)
             pendingID = nil
-            pendingText = nil
+            pendingFingerprint = nil
             await refresh(api, session: session)
             return true
         } catch {

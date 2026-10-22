@@ -27,5 +27,5 @@ jobs:
           name: OpenCode-Pocket-iPhone
           path: |
             build/OpenCode-Pocket-unsigned.ipa
-            build/iphone-onboarding.png
+            build/iphone-*.png
           retention-days: 7
