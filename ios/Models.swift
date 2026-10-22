@@ -193,6 +193,17 @@ struct ReadState: Codable {
         viewed[key] = max(viewed[key] ?? 0, stamp)
     }
 }
+struct PinState: Codable {
+    var conversations: [String: [String]] = [:]
+    func ids(server: String) -> [String] { conversations[server] ?? [] }
+    func contains(_ id: String, server: String) -> Bool { ids(server: server).contains(id) }
+    mutating func toggle(_ id: String, server: String) {
+        var values = ids(server: server)
+        if values.contains(id) { values.removeAll { $0 == id } }
+        else { values.insert(id, at: 0) }
+        conversations[server] = values
+    }
+}
 struct ControlStatus: Decodable {
     let configured: Bool
     let enabled: Bool

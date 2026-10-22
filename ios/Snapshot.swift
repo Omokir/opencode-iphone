@@ -86,6 +86,7 @@ struct SnapshotRoot: View {
 struct SnapshotConversationsView: View {
     @EnvironmentObject var api: API
     @EnvironmentObject var unread: UnreadStore
+    @EnvironmentObject var pins: PinStore
     @State private var prepared = false
     var body: some View {
         if prepared { SessionsView() }
@@ -95,6 +96,7 @@ struct SnapshotConversationsView: View {
                 old["time"] = ["created": 1, "updated": 100, "idle": 100]
                 let baseline = try! JSONDecoder().decode(Session.self, from: JSONSerialization.data(withJSONObject: old))
                 unread.initialize(server: api.server, sessions: [baseline])
+                pins.toggle(Snapshot.session.id, server: api.server)
                 prepared = true
             }
         }

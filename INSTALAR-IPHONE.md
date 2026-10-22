@@ -83,3 +83,15 @@ Controle foi testado por USB, desbloqueado. Após reinício ou expiração da
 assinatura, suporte de desenvolvimento/agente pode precisar de preparação no
 notebook. Se perder VPN ou rede, não presuma que botão Parar chegou ao notebook:
 bloqueie iPhone ou desconecte cabo. Outras conversas mantêm permissões próprias.
+
+## Atualização 0.3.4
+
+Para favoritar/fixar: segure conversa e escolha **Fixar conversa**, ou deslize
+linha para a direita e toque **Fixar**. Ela vai para seção **Fixadas** antes das
+demais conversas. Faça o inverso para desafixar. Preferência fica salva neste
+iPhone, separada por servidor; não renomeia nem arquiva chat no notebook.
+
+Painel de controle usa agora a proteção de consentimento no MCP do notebook.
+Começa pausado. Conecte iPhone por USB, desbloqueie e toque **Liberar por 15
+minutos** no painel. **Parar** fecha acesso normal do MCP e pede interrupção;
+não promete desfazer ações já executadas nem controlar outros programas do host.

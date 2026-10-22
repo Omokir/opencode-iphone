@@ -13,8 +13,10 @@ struct OpenCodePhoneApp: App {
     @StateObject private var api = API()
     #if SNAPSHOT
     @StateObject private var unread = UnreadStore(defaults: UserDefaults(suiteName: "snapshot-" + UUID().uuidString)!)
+    @StateObject private var pins = PinStore(defaults: UserDefaults(suiteName: "pins-snapshot-" + UUID().uuidString)!)
     #else
     @StateObject private var unread = UnreadStore()
+    @StateObject private var pins = PinStore()
     #endif
     var body: some Scene {
         WindowGroup {
@@ -27,6 +29,7 @@ struct OpenCodePhoneApp: App {
             }
             .environmentObject(api)
             .environmentObject(unread)
+            .environmentObject(pins)
             .tint(Style.blue)
         }
     }
@@ -81,6 +84,7 @@ struct ConnectView: View {
 struct SessionsView: View {
     @EnvironmentObject var api: API
     @EnvironmentObject var unread: UnreadStore
+    @EnvironmentObject var pins: PinStore
     @Environment(\.scenePhase) var phase
     @State private var sessions: [Session] = []
     @State private var cursor: String?
@@ -98,6 +102,11 @@ struct SessionsView: View {
     @State private var quotaLoading = false
     @State private var quotaChecked = Date.distantPast
     @State private var directory = "/home/omoki"
+    @State private var pinsChecked = Date.distantPast
+    @State private var pinLoadFailed = false
+    @State private var loadedMore = false
+    var pinnedIDs: [String] { pins.ids(server: api.server) }
+    var otherSessions: [Session] { sessions.filter { !pins.contains($0.id, server: api.server) } }
     var body: some View {
         NavigationStack(path: $path) {
             List {
@@ -126,21 +135,25 @@ struct SessionsView: View {
                     }
                     Text("Estado da conexão, autorização temporária e botão Parar.").font(.caption).foregroundStyle(.secondary)
                 }
-                Section("Conversas") {
-                    ForEach(sessions) { session in
-                        NavigationLink(value: session) {
-                            HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(session.title ?? "Sem título").font(.headline).lineLimit(2)
-                                Text(session.location.directory).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
-                            }.padding(.vertical, 5)
-                                Spacer(minLength: 0)
-                                if unread.isUnread(session, server: api.server) {
-                                    Circle().fill(Style.blue).frame(width: 9, height: 9).accessibilityHidden(true)
+                if !pinnedIDs.isEmpty {
+                    Section("Fixadas") {
+                        ForEach(pinnedIDs, id: \.self) { id in
+                            if let session = sessions.first(where: { $0.id == id }) {
+                                row(session, pinned: true)
+                            } else if !busy {
+                                HStack {
+                                    Label("Conversa fixada indisponível", systemImage: "pin.fill").font(.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Button("Desafixar") { pins.toggle(id, server: api.server) }.font(.caption)
                                 }
                             }
                         }
-                        .accessibilityValue(unread.isUnread(session, server: api.server) ? "Resposta não lida" : "")
+                        if pinLoadFailed { Text("Algumas fixadas não carregaram. Puxe para atualizar.").font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+                Section(pinnedIDs.isEmpty ? "Conversas" : "Outras conversas") {
+                    ForEach(otherSessions) { session in
+                        row(session, pinned: false)
                     }
                     if sessions.isEmpty && !busy { Text("Crie conversa ou puxe para atualizar.").foregroundStyle(.secondary) }
                     if cursor != nil { Button("Carregar mais") { Task { await load(more: true) } }.disabled(busy) }
@@ -153,7 +166,7 @@ struct SessionsView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button("Nova conversa", systemImage: "square.and.pencil") { create = true } }
             }
             .overlay { if busy && sessions.isEmpty { ProgressView() } }
-            .refreshable { await load() }
+            .refreshable { await load(resetPagination: true) }
             .task(id: phase) {
                 guard phase == .active else { return }
                 while !Task.isCancelled {
@@ -174,18 +187,54 @@ struct SessionsView: View {
             } message: { Text("Use caminho absoluto da pasta onde OpenCode vai trabalhar.") }
         }
     }
-    func load(more: Bool = false) async {
+    func row(_ session: Session, pinned: Bool) -> some View {
+        ConversationRow(session: session, pinned: pinned, unread: unread.isUnread(session, server: api.server)) {
+            pins.toggle(session.id, server: api.server)
+        }
+    }
+    func load(more: Bool = false, resetPagination: Bool = false) async {
         guard !busy else { return }
         busy = true
         defer { busy = false }
         do {
+            if resetPagination { loadedMore = false }
             var url = "/api/session?limit=30&archived=false&parentID=null"
             if more, let cursor { url += "&cursor=" + API.escape(cursor) } else { url += "&order=desc" }
             let page: Page<Session> = try await api.request(url)
             unread.initialize(server: api.server, sessions: page.data)
-            if more { sessions += page.data.filter { s in !sessions.contains(where: { $0.id == s.id }) } }
-            else { sessions = page.data }
-            cursor = page.cursor?.next
+            if more {
+                sessions += page.data.filter { s in !sessions.contains(where: { $0.id == s.id }) }
+                loadedMore = true
+            }
+            else {
+                let previous = sessions
+                var loaded = page.data
+                if loadedMore {
+                    let older = previous.filter { old in !loaded.contains { $0.id == old.id } }
+                    loaded += older
+                }
+                var failed = false
+                var refreshedPins = false
+                for id in pinnedIDs where !loaded.contains(where: { $0.id == id }) {
+                    let cached = previous.first { $0.id == id }
+                    let valid = id.hasPrefix("ses") && id.unicodeScalars.allSatisfy { CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-").contains($0) }
+                    guard valid else { failed = true; continue }
+                    if cached == nil || Date().timeIntervalSince(pinsChecked) > 30 {
+                        refreshedPins = true
+                        do {
+                            let value: Item<Session> = try await api.request("/api/session/\(id)")
+                            loaded.append(value.data)
+                        } catch {
+                            failed = true
+                            if let cached { loaded.append(cached) }
+                        }
+                    } else if let cached { loaded.append(cached) }
+                }
+                sessions = loaded
+                if refreshedPins { pinsChecked = Date() }
+                pinLoadFailed = failed
+            }
+            if more || !loadedMore { cursor = page.cursor?.next }
             error = nil
             do {
                 hostStatus = try await api.request("/phone/status")

@@ -33,3 +33,6 @@ xcrun simctl addmedia "$DEVICE" "$APP/Artwork.png"
 xcrun simctl launch "$DEVICE" com.omokir.opencodepocket --snapshot-chat
 python3 scripts/photo-picker-smoke.py "$CLI" "$DEVICE"
 xcrun simctl terminate "$DEVICE" com.omokir.opencodepocket
+xcrun simctl launch "$DEVICE" com.omokir.opencodepocket --snapshot-sessions
+python3 scripts/pins-smoke.py "$CLI" "$DEVICE"
+xcrun simctl terminate "$DEVICE" com.omokir.opencodepocket

@@ -16,6 +16,9 @@ Native SwiftUI remote client for OpenCode V2. iOS 17+; no webview, no embedded t
   reviewed one-action permissions and a Stop control for normal MCP automation.
 - Per-device unread dots for completed conversations; persisted IDs/timestamps,
   automatic foreground refresh, no push/background delivery claim.
+- Pin/unpin conversations via swipe or context menu, with a pinned section at
+  the top of the chat list. Pins persist per iPhone/server and older pinned chats
+  are fetched even when outside the first page; desktop metadata is untouched.
 - Notebook battery on conversation list: percentage, charging/AC and low-battery
   warning, with unavailable/stale states rather than a fabricated reading.
 - Codex weekly quota from local authenticated app-server read-only API, with
