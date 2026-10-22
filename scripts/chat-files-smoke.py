@@ -56,7 +56,7 @@ for agent in ['Plan', 'Build']:
     wait_for(lambda e: e.get('type') == 'Button' and label(e) == agent and (e.get('selected') is True or e.get('value') == 'Selecionado'))
 print('PASS: rapid Plan/Build buttons change confirmed selection for same session ID.')
 subprocess.run(['xcrun', 'simctl', 'io', device, 'screenshot', 'build/iphone-modes.png'], check=True)
-tap(lambda e: e.get('type') in ('TextField', 'TextView') and 'Peça algo ao OpenCode' in label(e))
+tap(lambda e: e.get('type') in ('TextField', 'TextView') and (e.get('identifier') == 'chat.composer' or label(e) == 'Mensagem'))
 draft = 'Rascunho de teste, nunca enviar.'
 command('io', 'fill', draft)
 wait_for(lambda e: label(e) == 'Rascunho salvo')

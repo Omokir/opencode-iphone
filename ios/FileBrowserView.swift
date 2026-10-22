@@ -170,8 +170,13 @@ struct FileBrowserView: View {
                 if let error = store.error {
                     Section {
                         Text(error).foregroundStyle(.red).textSelection(.enabled)
-                        if store.unconfirmed != nil { Button("Conferir recibo do último envio") { Task { await store.verifyReceipt(api) } } }
                         Button("Atualizar pasta") { Task { await store.load(api) } }.disabled(store.transferring)
+                    }
+                }
+                if store.unconfirmed != nil {
+                    Section {
+                        Text("Último envio ainda não confirmado. Atualizar pasta não equivale a confirmar recibo.").font(.caption).foregroundStyle(.orange)
+                        Button("Conferir recibo do último envio") { Task { await store.verifyReceipt(api) } }
                     }
                 }
                 Section("Arquivos e pastas") {

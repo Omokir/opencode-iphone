@@ -480,6 +480,8 @@ struct SessionsView: View {
                 }.disabled(importing || store.sending || attachments.count >= 5).accessibilityLabel("Anexar fotos ou arquivos")
                 TextField("Peça algo ao OpenCode…", text: $draft, axis: .vertical)
                     .lineLimit(1...6).padding(12).background(Style.paper, in: RoundedRectangle(cornerRadius: 16))
+                    .accessibilityLabel("Mensagem")
+                    .accessibilityIdentifier("chat.composer")
                 Button {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     let submitted = attachments
