@@ -15,8 +15,12 @@ jobs:
         run: python3 -m unittest discover -s bridge -v
       - name: Build native iPhone IPA
         run: bash scripts/build-ios.sh
+      - name: Launch native app in iPhone simulator
+        run: bash scripts/simulator-smoke.sh
       - uses: actions/upload-artifact@v4
         with:
           name: OpenCode-Pocket-iPhone
-          path: build/OpenCode-Pocket-unsigned.ipa
+          path: |
+            build/OpenCode-Pocket-unsigned.ipa
+            build/iphone-onboarding.png
           retention-days: 7

@@ -44,12 +44,12 @@ final class API: ObservableObject {
     init() {
         server = UserDefaults.standard.string(forKey: "server") ?? ""
         token = Vault.read()
-        connected = token != nil && !server.isEmpty
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 35
         configuration.waitsForConnectivity = false
         configuration.httpShouldSetCookies = false
         transport = URLSession(configuration: configuration)
+        connected = token != nil && !server.isEmpty
     }
 
     static func validate(_ value: String) throws -> URL {
