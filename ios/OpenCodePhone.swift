@@ -311,8 +311,21 @@ struct SessionsView: View {
         _attachments = State(initialValue: [PendingFile(name: "requisitos.txt", mime: "text/plain", data: Data("Projeto de exemplo".utf8))])
         #endif
     }
-    var body: some View {
+    var body: some View { lifecycleContent }
+    private var chatContent: some View {
         VStack(spacing: 0) {
+            controlHeader
+            modeHeader
+            connectionStrip
+            messageTimeline
+            notices
+            questionCards
+            permissionCards
+            attachmentStrip
+            composer
+        }
+    }
+    @ViewBuilder private var controlHeader: some View {
             if session.isPhoneControl {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
@@ -324,6 +337,8 @@ struct SessionsView: View {
                         .disabled(stoppingControl).accessibilityLabel("Parar automação do iPhone")
                 }.padding(.horizontal).padding(.vertical, 8).background(Color.orange.opacity(0.08))
             }
+    }
+    private var modeHeader: some View {
             HStack(spacing: 10) {
                 ForEach(["plan", "build"], id: \.self) { agent in
                     Button {
@@ -344,6 +359,8 @@ struct SessionsView: View {
                     Text(session.model?.id ?? "Modelo").font(.system(.caption, design: .monospaced)).lineLimit(1)
                 }.accessibilityLabel("Selecionar modelo e ajustar conversa")
             }.padding(.horizontal).padding(.vertical, 6).background(.bar)
+    }
+    private var connectionStrip: some View {
             HStack {
                 Label(store.liveConnected ? "Ao vivo" : "Consulta periódica", systemImage: store.liveConnected ? "dot.radiowaves.left.and.right" : "arrow.clockwise")
                     .foregroundStyle(store.liveConnected ? Color.green : .secondary)
@@ -352,6 +369,8 @@ struct SessionsView: View {
                 else if draftSavedAt != nil && (!draft.isEmpty || !attachments.isEmpty) { Text("Rascunho salvo").foregroundStyle(.secondary) }
                 else if !draft.isEmpty || !attachments.isEmpty { Text("Salvando rascunho…").foregroundStyle(.secondary) }
             }.font(.caption2).padding(.horizontal).padding(.vertical, 3)
+    }
+    private var messageTimeline: some View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 20) {
@@ -392,6 +411,8 @@ struct SessionsView: View {
                     }
                 }
             }
+    }
+    @ViewBuilder private var notices: some View {
             if let error = store.error {
                 Text(error).font(.caption).foregroundStyle(.red).padding(10).frame(maxWidth: .infinity).background(.red.opacity(0.06))
             }
@@ -406,6 +427,8 @@ struct SessionsView: View {
                 }.padding(10)
             }
             if let draftError { Text(draftError).font(.caption).foregroundStyle(.red).padding(.horizontal) }
+    }
+    private var questionCards: some View {
             ForEach(store.questions) { form in
                 Button { question = form } label: {
                     HStack {
@@ -419,6 +442,8 @@ struct SessionsView: View {
                     }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Style.blue.opacity(0.08))
                 }.accessibilityLabel("Responder: \(form.title)")
             }
+    }
+    @ViewBuilder private var permissionCards: some View {
             if !store.permissions.isEmpty {
                 ScrollView {
                     VStack(spacing: 1) {
@@ -430,6 +455,8 @@ struct SessionsView: View {
                     }
                 }.frame(maxHeight: 270)
             }
+    }
+    @ViewBuilder private var attachmentStrip: some View {
             if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
@@ -442,6 +469,8 @@ struct SessionsView: View {
                     }.padding(.horizontal).padding(.top, 8)
                 }
             }
+    }
+    private var composer: some View {
             HStack(alignment: .bottom, spacing: 12) {
                 Menu {
                     Button("Arquivos", systemImage: "folder") { selectingFiles = true }
@@ -465,7 +494,9 @@ struct SessionsView: View {
                 }.disabled(store.sending || importing || changingAgent || api.reachable == false || (session.isPhoneControl && !controlAllowed) || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty))
                     .accessibilityLabel("Enviar mensagem")
             }.padding().background(.bar)
-        }
+    }
+    private var navigationContent: some View {
+        chatContent
         .navigationTitle(session.title ?? "Conversa").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -476,6 +507,9 @@ struct SessionsView: View {
                 } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Opções da conversa")
             }
         }
+    }
+    private var presentationContent: some View {
+        navigationContent
         .sheet(isPresented: $options) { ChatOptionsView(session: $session) }
         .sheet(isPresented: $controlPanel) { PhoneControlView() }
         .sheet(isPresented: $fileBrowser) { FileBrowserView(initialDirectory: session.location.directory) }
@@ -515,6 +549,9 @@ struct SessionsView: View {
         .alert("Troca de modo não confirmada", isPresented: Binding(get: { modeError != nil }, set: { if !$0 { modeError = nil } })) {
             Button("Entendi", role: .cancel) { modeError = nil }
         } message: { Text(modeError ?? "") }
+    }
+    private var lifecycleContent: some View {
+        presentationContent
         .onAppear { restoreDraft() }
         .onDisappear { draftSaveTask?.cancel(); saveDraft(); store.stopLiveUpdates() }
         .onChange(of: draft) { _, _ in scheduleDraft() }
