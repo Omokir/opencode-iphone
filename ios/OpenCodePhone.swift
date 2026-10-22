@@ -81,6 +81,7 @@ struct SessionsView: View {
     @State private var busy = false
     @State private var settings = false
     @State private var create = false
+    @State private var phoneControl = false
     @State private var directory = "/home/omoki"
     var body: some View {
         NavigationStack(path: $path) {
@@ -95,6 +96,13 @@ struct SessionsView: View {
                     }.padding(.vertical, 10)
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
+                Section {
+                    Button { phoneControl = true } label: {
+                        Label("Controlar meu iPhone", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                            .font(.headline).padding(.vertical, 6)
+                    }
+                    Text("Estado da conexão, autorização temporária e botão Parar.").font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Conversas") {
                     ForEach(sessions) { session in
                         NavigationLink(value: session) {
@@ -119,6 +127,7 @@ struct SessionsView: View {
             .task { await load() }
             .onChange(of: path.count) { _, count in if count == 0 { Task { await load() } } }
             .sheet(isPresented: $settings) { SettingsView() }
+            .sheet(isPresented: $phoneControl) { PhoneControlView() }
             .alert("Nova conversa", isPresented: $create) {
                 TextField("Pasta no notebook", text: $directory).textInputAutocapitalization(.never).autocorrectionDisabled()
                 Button("Criar") { Task { await newSession() } }
@@ -163,6 +172,11 @@ struct ChatView: View {
     @State private var attachments: [PendingFile] = []
     @State private var importing = false
     @State private var changingAgent = false
+    @State private var controlPanel = false
+    @State private var controlAllowed = false
+    @State private var controlSummary = "Consultando automação…"
+    @State private var controlCheck = Date.distantPast
+    @State private var stoppingControl = false
     init(session: Session) {
         _session = State(initialValue: session)
         #if SNAPSHOT
@@ -171,6 +185,17 @@ struct ChatView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
+            if session.isPhoneControl {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(controlSummary).font(.caption.weight(.semibold))
+                        Button("Abrir painel") { controlPanel = true }.font(.caption2)
+                    }
+                    Spacer()
+                    Button("Parar", systemImage: "stop.circle.fill", role: .destructive) { Task { await stopControl() } }
+                        .disabled(stoppingControl).accessibilityLabel("Parar automação do iPhone")
+                }.padding(.horizontal).padding(.vertical, 8).background(Color.orange.opacity(0.08))
+            }
             HStack(spacing: 10) {
                 ForEach(["plan", "build"], id: \.self) { agent in
                     Button {
@@ -214,17 +239,26 @@ struct ChatView: View {
             if let error = store.error {
                 Text(error).font(.caption).foregroundStyle(.red).padding(10).frame(maxWidth: .infinity).background(.red.opacity(0.06))
             }
+            if api.reachable == false {
+                Label("Sem conexão com notebook. Verifique Tailscale. Nenhuma mensagem será reenviada automaticamente.", systemImage: "wifi.exclamationmark")
+                    .font(.caption).foregroundStyle(.orange).padding(8)
+            }
+            if let sendError = store.sendError {
+                HStack(alignment: .top) {
+                    Text(sendError).font(.caption).foregroundStyle(.red)
+                    Button("Fechar aviso") { store.sendError = nil }.font(.caption2)
+                }.padding(10)
+            }
+            if !store.permissions.isEmpty {
+                ScrollView {
+                    VStack(spacing: 1) {
             ForEach(store.permissions) { permission in
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Permissão solicitada", systemImage: "hand.raised.fill").font(.headline)
-                    Text(permission.message ?? permission.action).textSelection(.enabled)
-                    Text(permission.resources.joined(separator: "\n")).font(.system(.caption, design: .monospaced)).lineLimit(6)
-                    HStack {
-                        Button("Negar", role: .destructive) { Task { await store.reply(api, session: session, permission: permission, decision: "reject") } }
-                        Spacer()
-                        Button("Permitir uma vez") { Task { await store.reply(api, session: session, permission: permission, decision: "once") } }.buttonStyle(.borderedProminent)
+                PermissionCard(permission: permission, details: store.permissionDetails[permission.id], strict: session.isPhoneControl) { decision in
+                    await store.reply(api, session: session, permission: permission, decision: decision)
+                }
+            }
                     }
-                }.padding().background(Color.orange.opacity(0.12))
+                }.frame(maxHeight: 270)
             }
             if !attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -263,7 +297,7 @@ struct ChatView: View {
                     }
                 } label: {
                     Image(systemName: store.sending ? "ellipsis" : "arrow.up.circle.fill").font(.system(size: 36))
-                }.disabled(store.sending || importing || changingAgent || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty))
+                }.disabled(store.sending || importing || changingAgent || api.reachable == false || (session.isPhoneControl && !controlAllowed) || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty))
                     .accessibilityLabel("Enviar mensagem")
             }.padding().background(.bar)
         }
@@ -277,6 +311,7 @@ struct ChatView: View {
             }
         }
         .sheet(isPresented: $options) { ChatOptionsView(session: $session) }
+        .sheet(isPresented: $controlPanel) { PhoneControlView() }
         .fileImporter(isPresented: $selectingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             Task {
                 importing = true
@@ -309,6 +344,9 @@ struct ChatView: View {
             guard phase == .active else { return }
             while !Task.isCancelled {
                 await store.refresh(api, session: session)
+                if session.isPhoneControl && Date().timeIntervalSince(controlCheck) > 5 {
+                    await refreshControl()
+                }
                 do { try await Task.sleep(for: .seconds(store.error == nil ? 2 : 5)) } catch { break }
             }
         }
@@ -317,6 +355,25 @@ struct ChatView: View {
         try PendingFile.validate(attachments + [file])
         attachments.append(file)
         store.error = nil
+    }
+    func refreshControl() async {
+        do {
+            let status: ControlStatus = try await api.request("/phone/control/status")
+            controlAllowed = status.enabled
+            controlSummary = status.enabled ? status.activity : "Automação pausada — libere no painel"
+            controlCheck = Date()
+        } catch { controlSummary = "Estado da automação não confirmado" }
+    }
+    func stopControl() async {
+        stoppingControl = true
+        defer { stoppingControl = false }
+        do {
+            let result: ControlStopped = try await api.request("/phone/control/stop", method: "POST", body: [:])
+            guard !result.enabled else { throw PhoneError.message("Bloqueio não confirmado.") }
+            controlAllowed = false
+            controlSummary = "Automação pausada"
+            store.sendError = result.warnings.isEmpty ? "Novas ações bloqueadas; interrupção solicitada. Ações anteriores não foram desfeitas." : result.warnings.joined(separator: " ")
+        } catch { store.sendError = "Parada não confirmada. Bloqueie iPhone ou desconecte cabo. \(error.localizedDescription)" }
     }
     func switchAgent(_ agent: String) async {
         guard agent != session.agent else { return }

@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from phone_control import PhoneControl
 
 STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
@@ -21,9 +22,10 @@ ATTEMPTS = []
 MAX_BODY = 16 * 1024 * 1024
 RULES = {
     'GET': [r'/api/info', r'/api/session', r'/api/session/ses[^/]+',
-            r'/api/session/ses[^/]+/(message|permission)', r'/phone/status', r'/phone/catalog'],
+            r'/api/session/ses[^/]+/(message|permission)', r'/api/session/ses[^/]+/message/msg[^/]+',
+            r'/phone/status', r'/phone/catalog', r'/phone/control/status'],
     'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
-             r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/phone/mode'],
+             r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/phone/mode', r'/phone/control/(start|stop)'],
     'PATCH': [r'/api/session/ses[^/]+'],
 }
 
@@ -144,6 +146,24 @@ class Handler(BaseHTTPRequestHandler):
             if not allowed(self.command, path):
                 return self.reply(403, {'error': 'Route not available to mobile client'})
             body = self.rfile.read(length) if length else None
+            control = self.server.phone_control
+            if path == '/phone/control/status':
+                return self.reply(200, control.status())
+            if path == '/phone/control/start':
+                return self.reply(*control.start())
+            if path == '/phone/control/stop':
+                return self.reply(*control.stop())
+            session_match = re.match(r'/api/session/(ses[^/]+)', path)
+            if session_match and control.is_control_session(session_match[1]):
+                payload = json.loads(body or b'{}') if self.command == 'POST' else {}
+                if path.endswith('/reply') and payload.get('decision') not in ('once', 'reject'):
+                    return self.reply(403, {'error': 'Controle aceita apenas permitir uma vez ou negar.'})
+                if path.endswith('/agent') and payload.get('agent') not in ('build', 'plan'):
+                    return self.reply(403, {'error': 'Conversa de controle usa apenas Build ou Plan.'})
+                if path.endswith('/prompt'):
+                    state = control.state()
+                    if state.get('enabled') is not True or state.get('expiresAt', 0) <= time.time():
+                        return self.reply(409, {'error': 'Automação pausada ou expirada. Libere novamente no painel do iPhone.'})
             if path == '/phone/catalog':
                 query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                 return self.reply(*catalog(query.get('directory', [str(Path.home())])[0]))
@@ -179,5 +199,6 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == '__main__':
     os.umask(0o077)
     server = ThreadingHTTPServer(('127.0.0.1', 49375), Handler)
+    server.phone_control = PhoneControl(STATE, upstream)
     server.daemon_threads = True
     server.serve_forever()

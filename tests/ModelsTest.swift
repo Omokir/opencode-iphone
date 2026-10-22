@@ -36,6 +36,12 @@ struct ModelsTest {
         let catalog = try decoder.decode(Catalog.self, from: Data(#"{"models":[{"id":"m","providerID":"p","name":"Model","capabilities":{"input":["text","image"]},"variants":[{"id":"high"}],"status":"active"}],"agents":[{"id":"plan","name":"Plan"}]}"#.utf8))
         precondition(catalog.models[0].key == "p/m")
         precondition(catalog.agents[0].id == "plan")
+        let control = try decoder.decode(ControlStatus.self, from: Data(#"{"configured":true,"enabled":false,"expiresAt":0,"sessionID":"ses_control","device":{"name":"Test","connected":true,"agentInstalled":true,"locked":null},"running":false,"pending":0,"activity":"Aguardando tarefa","ready":false}"#.utf8))
+        precondition(!control.enabled && control.device.locked == nil)
+        let json = try decoder.decode(JSONValue.self, from: Data(#"{"text":"Hello","enabled":true,"point":[12,34],"other":null}"#.utf8))
+        precondition(json.pretty.contains("Hello") && json.pretty.contains("true"))
+        let source = try decoder.decode(Permission.self, from: Data(#"{"id":"per_control","action":"iphone_mobile_launch_app","resources":["*"],"source":{"id":"call_control","messageID":"msg_control"}}"#.utf8))
+        precondition(source.source?.id == "call_control")
         print("PASS: native model decoding, pagination, tool status, permissions, message IDs")
         print("PASS: model variants, catalog, attachment URIs/limits, provider errors")
     }

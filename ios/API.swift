@@ -38,6 +38,7 @@ enum Vault {
 final class API: ObservableObject {
     @Published var connected = false
     @Published var server: String
+    @Published var reachable: Bool?
     private var token: String?
     private let transport: URLSession
 
@@ -78,7 +79,15 @@ final class API: ObservableObject {
             request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         }
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
-        let (data, response) = try await transport.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await transport.data(for: request)
+        } catch {
+            if (error as? URLError)?.code != .cancelled { reachable = false }
+            throw error
+        }
+        reachable = true
         guard let http = response as? HTTPURLResponse else { throw PhoneError.message("Resposta inválida.") }
         guard (200..<300).contains(http.statusCode) else {
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]

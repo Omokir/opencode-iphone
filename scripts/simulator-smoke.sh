@@ -16,7 +16,7 @@ DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d
 xcrun simctl boot "$DEVICE"
 xcrun simctl bootstatus "$DEVICE" -b
 xcrun simctl install "$DEVICE" "$APP"
-for SCREEN in onboarding chat options models; do
+for SCREEN in onboarding chat options models control; do
   xcrun simctl launch "$DEVICE" com.omokir.opencodepocket "--snapshot-$SCREEN"
   sleep 3
   xcrun simctl io "$DEVICE" screenshot "build/iphone-$SCREEN.png"

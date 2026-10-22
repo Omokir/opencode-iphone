@@ -18,6 +18,7 @@ class GatewayTests(unittest.TestCase):
         self.patch.start()
         server.ATTEMPTS.clear()
         self.http = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
+        self.http.phone_control = server.PhoneControl(self.state, lambda *args: server.upstream(*args))
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
 
@@ -126,6 +127,22 @@ class GatewayTests(unittest.TestCase):
         with patch.object(server, 'upstream', return_value=(200, b'{"data":{"id":"input"}}')) as upstream:
             self.assertEqual(self.request('/api/session/ses_123/prompt', 'test-token', payload)[0], 200)
             self.assertEqual(json.loads(upstream.call_args.args[2]), payload)
+
+    def test_control_session_disallows_permanent_approvals_and_other_agents(self):
+        self.http.phone_control.save({'sessionID': 'ses_123', 'enabled': True, 'expiresAt': server.time.time() + 60})
+        self.assertEqual(self.request('/api/session/ses_123/permission/per_1/reply', 'test-token', {'decision': 'always'})[0], 403)
+        self.assertEqual(self.request('/api/session/ses_123/agent', 'test-token', {'agent': 'general'})[0], 403)
+
+    def test_paused_control_session_rejects_prompt_without_upstream_write(self):
+        self.http.phone_control.save({'sessionID': 'ses_123', 'enabled': False, 'expiresAt': 0})
+        with patch.object(server, 'upstream') as upstream:
+            self.assertEqual(self.request('/api/session/ses_123/prompt', 'test-token', {'text': 'Hello'})[0], 409)
+            upstream.assert_not_called()
+
+    def test_control_routes_require_authentication(self):
+        self.assertEqual(self.request('/phone/control/status')[0], 401)
+        self.assertEqual(self.request('/phone/control/start', body={})[0], 401)
+        self.assertEqual(self.request('/phone/control/stop', body={})[0], 401)
 
 
 if __name__ == '__main__':

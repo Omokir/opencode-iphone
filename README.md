@@ -12,6 +12,8 @@ Native SwiftUI remote client for OpenCode V2. iOS 17+; no webview, no embedded t
 - Per-chat Plan/Build switch, agent and model/variant selection, rename action.
 - Native Photos and Files pickers: images, PDF and UTF-8 text/source files.
 - Visible provider errors, attachment history and bounded uploads.
+- iPhone control panel, expiring consent, isolated control conversation,
+  reviewed one-action permissions and a Stop control for normal MCP automation.
 - HTTPS over private Tailscale network; one-time, five-minute pairing code.
 - Device-only Keychain token storage; no provider or Apple credentials in app.
 
@@ -61,3 +63,5 @@ Build, signing, installation, and launch are separate verification stages.
 Simulator screenshots use synthetic fixtures compiled with `-D SNAPSHOT`.
 These fixtures are excluded from device IPA builds. No real chat contents,
 provider credentials, pairing codes or access tokens go to CI.
+
+Control scope, host gate and signing/runtime limitations: [PHONE-CONTROL.md](docs/PHONE-CONTROL.md).

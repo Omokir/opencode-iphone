@@ -7,6 +7,8 @@ final class ChatStore: ObservableObject {
     @Published var permissions: [Permission] = []
     @Published var error: String?
     @Published var sending = false
+    @Published var sendError: String?
+    @Published var permissionDetails: [String: String] = [:]
     @Published var loadingOlder = false
     @Published var olderCursor: String?
     @Published var refreshed = false
@@ -32,6 +34,17 @@ final class ChatStore: ObservableObject {
             }
             let requests: Page<Permission> = try await api.request("/api/session/\(session.id)/permission")
             permissions = requests.data
+            for request in requests.data {
+                guard permissionDetails[request.id] == nil, let source = request.source else { continue }
+                var message = messages.first { $0.id == source.messageID }
+                if message == nil {
+                    let full: Item<Message> = try await api.request("/api/session/\(session.id)/message/\(source.messageID)")
+                    message = full.data
+                }
+                if let input = message?.content?.first(where: { $0.id == source.id })?.state?.input {
+                    permissionDetails[request.id] = input.pretty
+                }
+            }
             error = nil
             refreshed = true
         } catch is CancellationError { }
@@ -66,10 +79,11 @@ final class ChatStore: ObservableObject {
                                                   body: body)
             pendingID = nil
             pendingFingerprint = nil
+            sendError = nil
             await refresh(api, session: session)
             return true
         } catch {
-            self.error = "Envio não confirmado: \(error.localizedDescription) Confira conversa antes de tentar novamente."
+            self.sendError = "Envio não confirmado: \(error.localizedDescription) Confira conversa antes de tentar novamente. Texto e anexos foram mantidos."
             return false
         }
     }
