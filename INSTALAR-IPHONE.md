@@ -95,3 +95,25 @@ Painel de controle usa agora a proteção de consentimento no MCP do notebook.
 Começa pausado. Conecte iPhone por USB, desbloqueie e toque **Liberar por 15
 minutos** no painel. **Parar** fecha acesso normal do MCP e pede interrupção;
 não promete desfazer ações já executadas nem controlar outros programas do host.
+
+## Atualização 0.4.0
+
+- Botões rápidos **Plan/Build** confirmam modo no servidor; comparação de sessão
+  foi corrigida para não ignorar metadados alterados com mesmo ID. Troca não
+  promete transformar retroativamente uma resposta que já está em execução.
+- **Pasta** na tela inicial abre arquivos do notebook; no chat, **… → Arquivos
+  do projeto** tenta abrir a pasta daquele projeto, quando permitida.
+- Navegue e toque em arquivo para baixar/visualizar. Use **Salvar/Compartilhar**
+  para guardar no Arquivos do iPhone. Upload vai para pasta atualmente aberta.
+- Até 64 MB por transferência; substituição exige confirmação e versão não pode
+  ter mudado. Não há apagar/executar/descompactar. Ocultos, chaves comuns e links
+  permanecem bloqueados; outras raízes precisam ser liberadas no notebook.
+- Rascunhos locais guardam texto e anexos existentes; nada é reenviado sozinho.
+  Aviso de envio não confirmado exige conferir conversa antes de tentar de novo.
+- Toque no anexo para prévia. Respostas atualizam por eventos enquanto app está
+  ativo; consulta periódica continua se conexão ao vivo cair. Ao ler histórico,
+  use **Últimas mensagens** para voltar ao fim sem ser puxado automaticamente.
+
+Mantenha app aberto em transferências. Cancelar não desfaz arquivo que já chegou
+ao notebook. Se resposta do upload se perder, confira recibo/pasta antes de novo
+envio. Isso continua sendo workspace remoto, não OpenCode executado no iPhone.

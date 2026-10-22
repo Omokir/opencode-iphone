@@ -16,19 +16,26 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from phone_control import PhoneControl
 from battery import battery_status
 from codex_usage import CodexUsage
+from files import FileBrowser, FileError
+from events import session_hint
 
 STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
 PAIR_LOCK = threading.Lock()
 ATTEMPTS = []
 MAX_BODY = 16 * 1024 * 1024
+ENDPOINT_LOCK = threading.Lock()
+CORE_ENDPOINT = None
+CORE_CHECKED_AT = 0
+STREAM_SLOTS = threading.BoundedSemaphore(8)
 RULES = {
     'GET': [r'/api/info', r'/api/session', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
-            r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage'],
+            r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage',
+            r'/phone/files/(roots|list|download|receipt|context)', r'/phone/session/ses[^/]+/events'],
     'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
-             r'/phone/mode', r'/phone/control/(start|stop)'],
+             r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload'],
     'PATCH': [r'/api/session/ses[^/]+'],
 }
 
@@ -69,22 +76,33 @@ def pair(code):
         return 200, {'token': secret()}
 
 
-def upstream(method, path, data):
-    # Resolve the managed service every time; its port can change on restart.
-    url = subprocess.check_output(['opencode', 'service', 'status'], text=True, timeout=15).strip()
+def core_request(method, path, data=None):
+    global CORE_ENDPOINT, CORE_CHECKED_AT
+    with ENDPOINT_LOCK:
+        if CORE_ENDPOINT is None or time.monotonic() - CORE_CHECKED_AT > 2:
+            CORE_ENDPOINT = subprocess.check_output(['opencode', 'service', 'status'], text=True, timeout=15).strip()
+            CORE_CHECKED_AT = time.monotonic()
+        url = CORE_ENDPOINT
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1', 'localhost', '::1'):
         raise ValueError('Managed service is not loopback')
     password = json.loads(SERVICE_CONFIG.read_text())['password']
     auth = base64.b64encode(('opencode:' + password).encode()).decode()
-    request = urllib.request.Request(url.rstrip('/') + path, data=data, method=method,
+    return urllib.request.Request(url.rstrip('/') + path, data=data, method=method,
                                     headers={'Authorization': 'Basic ' + auth,
                                              'Content-Type': 'application/json'})
+def upstream(method, path, data):
+    global CORE_ENDPOINT
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(core_request(method, path, data), timeout=30) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
+    except (urllib.error.URLError, TimeoutError, ConnectionError):
+        with ENDPOINT_LOCK:
+            CORE_ENDPOINT = None
+        # Never replay writes with uncertain admission. Caller inspects state.
+        raise
 
 
 def catalog(directory):
@@ -114,6 +132,30 @@ def catalog(directory):
     return 200, result
 
 
+def mobile_messages(body):
+    value = json.loads(body)
+    messages = value.get('data')
+    if isinstance(messages, dict):
+        messages = [messages]
+    if not isinstance(messages, list):
+        return body
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        if isinstance(message.get('files'), list):
+            # Metadata is enough for history. Do not resend base64 attachment
+            # contents on every live refresh; file-browser downloads are separate.
+            message['files'] = [{key: item[key] for key in ('name', 'mime') if key in item}
+                                for item in message['files'] if isinstance(item, dict)]
+        for part in message.get('content', []):
+            if isinstance(part, dict) and part.get('type') == 'tool' and isinstance(part.get('state'), dict):
+                state = part['state']
+                state.pop('content', None)  # Current mobile UI shows status, not raw tool output.
+                if state.get('status') not in ('running', 'streaming'):
+                    state.pop('input', None)
+    return json.dumps(value).encode()
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # No URLs, prompts, tokens or response content in access logs.
@@ -127,6 +169,47 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def stream_events(self, session_id):
+        # Stream setup is read-only and authorized exactly like session history.
+        request = core_request('GET', '/api/event')
+        request.add_header('Accept', 'text/event-stream')
+        with urllib.request.urlopen(request, timeout=20) as response:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Accel-Buffering', 'no')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(b'event: connected\ndata: {"type":"connected"}\n\n')
+            self.wfile.flush()
+            started = time.monotonic()
+            data = []
+            oversized = False
+            try:
+                while time.monotonic() - started < 50:
+                    line = response.readline(262145)
+                    if not line:
+                        break
+                    if len(line) >= 262145:
+                        oversized = True
+                        continue
+                    if line.strip() == b'':
+                        if data and not oversized:
+                            hint = session_hint('\n'.join(data), session_id)
+                            if hint:
+                                packet = 'event: changed\ndata: ' + json.dumps(hint) + '\n\n'
+                                self.wfile.write(packet.encode())
+                                self.wfile.flush()
+                        data = []
+                        oversized = False
+                    elif line.startswith(b'data:') and not oversized:
+                        if sum(map(len, data)) + len(line) > 262144:
+                            oversized = True
+                        else:
+                            data.append(line[5:].decode('utf-8', 'replace').strip())
+            except (TimeoutError, OSError):
+                pass
+
     def handle_request(self):
         try:
             if self.headers.get('Origin'):
@@ -135,7 +218,8 @@ class Handler(BaseHTTPRequestHandler):
             if not self.path.startswith('/') or '%' in path or '..' in path:
                 return self.reply(400, {'error': 'Invalid path'})
             length = int(self.headers.get('Content-Length', '0'))
-            if not 0 <= length <= MAX_BODY or self.headers.get('Transfer-Encoding'):
+            maximum = self.server.files.max_bytes if path == '/phone/files/upload' else MAX_BODY
+            if not 0 <= length <= maximum or self.headers.get('Transfer-Encoding'):
                 return self.reply(413, {'error': 'Request too large'})
             self.connection.settimeout(10)
             if path == '/pair' and self.command == 'POST':
@@ -148,6 +232,49 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(401, {'error': 'Pareie novamente no notebook.'})
             if not allowed(self.command, path):
                 return self.reply(403, {'error': 'Route not available to mobile client'})
+            stream = re.fullmatch(r'/phone/session/(ses[^/]+)/events', path)
+            if stream:
+                if not STREAM_SLOTS.acquire(blocking=False):
+                    return self.reply(429, {'error': 'Muitas conexões de atualização. Aguarde e tente novamente.'})
+                try:
+                    return self.stream_events(stream[1])
+                finally:
+                    STREAM_SLOTS.release()
+            if path.startswith('/phone/files/'):
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                root = query.get('root', ['home'])[0]
+                relative = query.get('path', [''])[0]
+                if path.endswith('/roots'):
+                    return self.reply(200, self.server.files.root_list())
+                if path.endswith('/context'):
+                    return self.reply(200, self.server.files.context(query.get('directory', [''])[0]))
+                if path.endswith('/list'):
+                    return self.reply(200, self.server.files.listing(root, relative))
+                if path.endswith('/receipt'):
+                    return self.reply(200, self.server.files.receipt(query.get('id', [''])[0]))
+                if path.endswith('/download'):
+                    with self.server.files.download(root, relative, self.headers.get('If-Match')) as result:
+                        self.send_response(200)
+                        self.send_header('Content-Type', result['mime'])
+                        self.send_header('Content-Length', str(result['size']))
+                        self.send_header('Cache-Control', 'no-store')
+                        self.send_header('X-Content-SHA256', result['sha256'])
+                        self.send_header('ETag', result['version'])
+                        self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + urllib.parse.quote(result['name'], safe=''))
+                        self.end_headers()
+                        while chunk := result['stream'].read(65536):
+                            self.wfile.write(chunk)
+                    return
+                if path.endswith('/upload'):
+                    if self.headers.get('Content-Type', '').split(';')[0] != 'application/octet-stream':
+                        return self.reply(415, {'error': 'Envio precisa usar application/octet-stream.'})
+                    if self.headers.get('If-None-Match') == '*':
+                        expected = '*'
+                    else:
+                        expected = self.headers.get('If-Match')
+                    result = self.server.files.upload(root, relative, self.rfile, length,
+                        self.headers.get('X-Upload-ID', ''), self.headers.get('X-Content-SHA256', ''), expected)
+                    return self.reply(200, result)
             body = self.rfile.read(length) if length else None
             control = self.server.phone_control
             if path == '/phone/codex/usage':
@@ -191,7 +318,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {'awake': value})
             if self.command == 'POST' and path == '/api/session':
                 body = session_defaults(body)
-            return self.reply(*upstream(self.command, self.path, body))
+            status, result = upstream(self.command, self.path, body)
+            if status == 200 and self.command == 'GET' and re.fullmatch(r'/api/session/ses[^/]+/message(?:/msg[^/]+)?', path):
+                result = mobile_messages(result)
+            return self.reply(status, result)
+        except FileError as error:
+            self.reply(error.status, error.body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
         except (ValueError, TypeError, json.JSONDecodeError):
             self.reply(400, {'error': 'Invalid request'})
         except Exception:
@@ -207,5 +341,6 @@ if __name__ == '__main__':
     server = ThreadingHTTPServer(('127.0.0.1', 49375), Handler)
     server.phone_control = PhoneControl(STATE, upstream)
     server.codex_usage = CodexUsage()
+    server.files = FileBrowser(STATE)
     server.daemon_threads = True
     server.serve_forever()

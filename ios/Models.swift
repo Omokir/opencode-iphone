@@ -20,15 +20,15 @@ struct Session: Decodable, Identifiable, Hashable {
     let agent: String?
     let time: Time?
     let outcome: String?
-    struct Time: Decodable { let created: Double; let updated: Double; let idle: Double? }
+    struct Time: Decodable, Equatable { let created: Double; let updated: Double; let idle: Double? }
     var completionStamp: Double? {
         guard ["succeeded", "failed", "interrupted"].contains(outcome ?? "") else { return nil }
         return time?.idle
     }
     let metadata: Metadata?
-    struct Metadata: Decodable { let phoneControl: Bool? }
+    struct Metadata: Decodable, Equatable { let phoneControl: Bool? }
     var isPhoneControl: Bool { metadata?.phoneControl == true }
-    struct Location: Decodable { let directory: String }
+    struct Location: Decodable, Equatable { let directory: String }
     struct Model: Decodable, Equatable {
         let providerID: String
         let id: String
@@ -40,7 +40,6 @@ struct Session: Decodable, Identifiable, Hashable {
             return value
         }
     }
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 struct Message: Decodable, Identifiable {
@@ -239,10 +238,13 @@ struct CatalogModel: Decodable, Identifiable {
 struct PendingFile: Identifiable {
     static let maxFileBytes = 4 * 1024 * 1024
     static let maxTotalBytes = 8 * 1024 * 1024
-    let id = UUID()
+    let id: UUID
     let name: String
     let mime: String
     let data: Data
+    init(id: UUID = UUID(), name: String, mime: String, data: Data) {
+        self.id = id; self.name = name; self.mime = mime; self.data = data
+    }
     var category: String { mime.hasPrefix("image/") ? "image" : mime == "application/pdf" ? "pdf" : "text" }
     var payload: [String: Any] { ["uri": "data:\(mime);base64,\(data.base64EncodedString())", "name": name] }
     static func validate(_ files: [Self]) throws {

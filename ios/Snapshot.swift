@@ -35,6 +35,16 @@ import SwiftUI
             else if method == "PATCH" { object["title"] = body?["title"] }
             else if route.hasSuffix("/prompt") { result = ["data": ["id": "input_demo"]] }
         } else if route == "/phone/catalog" { result = catalog }
+        else if route == "/phone/files/roots" { result = ["roots": [["id": "home", "name": "Pasta pessoal (exemplo)"]], "maxBytes": 67108864] }
+        else if route == "/phone/files/context" { result = ["root": "home", "path": "Documents"] }
+        else if route == "/phone/files/list" {
+            let query = URLComponents(string: "https://fixture.invalid" + path)?.queryItems
+            let folder = query?.first { $0.name == "path" }?.value ?? ""
+            let file: [String: Any] = ["name": "README.txt", "path": folder.isEmpty ? "README.txt" : folder + "/README.txt", "kind": "file", "size": 18, "modifiedAt": 1000, "version": "fixture-version", "readable": true]
+            var entries = [file]
+            if folder.isEmpty { entries.insert(["name": "Documents", "path": "Documents", "kind": "directory", "readable": true, "version": "directory-version"], at: 0) }
+            result = ["root": "home", "path": folder, "parent": folder.isEmpty ? NSNull() as Any : "" as Any, "entries": entries, "truncated": false]
+        }
         else if route == "/phone/control/status" {
             result = ["configured": true, "enabled": true, "expiresAt": Date().timeIntervalSince1970 + 600,
                       "sessionID": "ses_demo", "device": ["connected": true, "agentInstalled": true, "name": "Meu iPhone"],
@@ -74,6 +84,7 @@ struct SnapshotRoot: View {
         else if arguments.contains("--snapshot-sessions") { SnapshotConversationsView() }
         else if arguments.contains("--snapshot-control") { PhoneControlView() }
         else if arguments.contains("--snapshot-question") { QuestionFormView(question: Snapshot.question, session: session) { } }
+        else if arguments.contains("--snapshot-files") { FileBrowserView() }
         else if arguments.contains("--snapshot-options") { ChatOptionsView(session: $session) }
         else if arguments.contains("--snapshot-models") {
             let models = try! JSONDecoder().decode(Catalog.self, from: JSONSerialization.data(withJSONObject: Snapshot.catalog)).models

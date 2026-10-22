@@ -19,6 +19,10 @@ Native SwiftUI remote client for OpenCode V2. iOS 17+; no webview, no embedded t
 - Pin/unpin conversations via swipe or context menu, with a pinned section at
   the top of the chat list. Pins persist per iPhone/server and older pinned chats
   are fetched even when outside the first page; desktop metadata is untouched.
+- Notebook file browser with protected roots, bounded binary download/upload,
+  checksums, version-checked overwrite confirmation and upload receipts.
+- Local protected drafts (text and existing chat attachments), attachment
+  thumbnails/Quick Look previews and event-driven foreground response updates.
 - Notebook battery on conversation list: percentage, charging/AC and low-battery
   warning, with unavailable/stale states rather than a fabricated reading.
 - Codex weekly quota from local authenticated app-server read-only API, with
@@ -78,6 +82,7 @@ These fixtures are excluded from device IPA builds. No real chat contents,
 provider credentials, pairing codes or access tokens go to CI.
 
 Control scope, host gate and signing/runtime limitations: [PHONE-CONTROL.md](docs/PHONE-CONTROL.md).
+File-transfer/draft/live-update boundaries: [FILES-AND-LIVE-CHAT.md](docs/FILES-AND-LIVE-CHAT.md).
 
 Optional local model integration test (may use provider credits):
 `python3 scripts/control-policy-smoke.py`. It overrides iPhone MCP only in a

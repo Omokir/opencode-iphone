@@ -20,7 +20,7 @@ jobs:
           build/models-test
       - name: Native preference persistence tests
         run: |
-          xcrun swiftc -parse-as-library ios/Models.swift ios/PinStore.swift tests/StoreTests.swift -o build/stores-test
+          xcrun swiftc -parse-as-library -framework CryptoKit ios/Models.swift ios/PinStore.swift ios/DraftStore.swift tests/StoreTests.swift -o build/stores-test
           build/stores-test
       - name: Build native iPhone IPA
         run: bash scripts/build-ios.sh

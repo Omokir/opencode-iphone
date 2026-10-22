@@ -6,7 +6,7 @@ mkdir -p "$APP"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 xcrun --sdk iphoneos swiftc -swift-version 5 -parse-as-library -O \
   -target arm64-apple-ios17.0 -sdk "$SDK" \
-  -framework SwiftUI -framework UIKit -framework Security \
+  -framework SwiftUI -framework UIKit -framework Security -framework CryptoKit -framework QuickLook -framework ImageIO \
   -Xlinker -rpath -Xlinker @executable_path/Frameworks \
   ios/*.swift \
   -o "$APP/OpenCodePocket"

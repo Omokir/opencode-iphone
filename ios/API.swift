@@ -40,7 +40,7 @@ final class API: ObservableObject {
     @Published var server: String
     @Published var reachable: Bool?
     private var token: String?
-    private let transport: URLSession
+    let transport: URLSession
 
     init() {
         server = UserDefaults.standard.string(forKey: "server") ?? ""
@@ -49,6 +49,7 @@ final class API: ObservableObject {
         configuration.timeoutIntervalForRequest = 35
         configuration.waitsForConnectivity = false
         configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
         transport = URLSession(configuration: configuration)
         connected = token != nil && !server.isEmpty
     }
@@ -69,15 +70,8 @@ final class API: ObservableObject {
         #if SNAPSHOT
         return try JSONDecoder().decode(T.self, from: Snapshot.response(path, method: method, body: body))
         #else
-        let base = try Self.validate(server).absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = URL(string: base + path) else { throw PhoneError.message("Endereço inválido.") }
-        var request = URLRequest(url: url)
-        request.httpMethod = method
+        var request = try makeRequest(path, method: method, authenticated: authenticated)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if authenticated {
-            guard let token else { throw PhoneError.message("Conecte novamente ao notebook.") }
-            request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
-        }
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         let data: Data
         let response: URLResponse
@@ -97,6 +91,43 @@ final class API: ObservableObject {
         }
         let payload = data.isEmpty ? Data("{}".utf8) : data
         return try JSONDecoder().decode(T.self, from: payload)
+        #endif
+    }
+
+    func makeRequest(_ path: String, method: String = "GET", authenticated: Bool = true) throws -> URLRequest {
+        guard path.hasPrefix("/"), !path.hasPrefix("//") else { throw PhoneError.message("Caminho inválido.") }
+        let base = try Self.validate(server).absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: base + path) else { throw PhoneError.message("Endereço inválido.") }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.httpMethod = method
+        if authenticated {
+            guard let token else { throw PhoneError.message("Conecte novamente ao notebook.") }
+            request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    func watchSession(_ id: String, changed: @MainActor (String) -> Void) async throws {
+        #if SNAPSHOT
+        changed("connected")
+        while !Task.isCancelled {
+            try await Task.sleep(for: .seconds(1))
+            changed("session.changed")
+        }
+        #else
+        var request = try makeRequest("/phone/session/\(id)/events")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 65
+        let (bytes, response) = try await transport.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw PhoneError.message("Atualização ao vivo indisponível; consulta periódica continua.")
+        }
+        struct Hint: Decodable { let type: String }
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            if line.hasPrefix("data:"), let data = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces).data(using: .utf8),
+               let hint = try? JSONDecoder().decode(Hint.self, from: data) { changed(hint.type) }
+        }
         #endif
     }
 

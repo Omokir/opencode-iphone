@@ -8,37 +8,63 @@ final class ChatStore: ObservableObject {
     @Published var error: String?
     @Published var sending = false
     @Published var sendError: String?
+    @Published var sendUnconfirmed = false
     @Published var permissionDetails: [String: String] = [:]
     @Published var sessionSnapshot: Session?
     @Published var questions: [QuestionForm] = []
     @Published var loadingOlder = false
     @Published var olderCursor: String?
     @Published var refreshed = false
+    @Published var liveConnected = false
+    @Published var renderRevision = 0
     private var pendingID: String?
     private var pendingFingerprint: Data?
-    private var newest: [Message] = []
-    private var older: [Message] = []
+    private var metadataRevision = 0
+    private var ticket = 0
+    private var appliedMessages = 0
+    private var appliedMetadata = 0
+    private var appliedFull = 0
+    private var pump: Task<Void, Never>?
+    private var pumpRevision = 0
+    private var dirty = false
+    private var fullDirty = false
+
+    private func nextTicket() -> Int { ticket &+= 1; return ticket }
+    private func applyMessages(_ page: Page<Message>, ticket: Int, older: Bool = false) {
+        guard older || ticket >= appliedMessages else { return }
+        var merged = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        for message in page.data where message.visible {
+            if !older || merged[message.id] == nil { merged[message.id] = message }
+        }
+        messages = merged.values.sorted { $0.time.created == $1.time.created ? $0.id < $1.id : $0.time.created < $1.time.created }
+        if !older { appliedMessages = ticket }
+        renderRevision &+= 1
+    }
+    private func applySession(_ value: Session, ticket: Int, revision: Int) {
+        guard revision == metadataRevision, ticket >= appliedMetadata else { return }
+        if let current = sessionSnapshot?.time?.updated, let next = value.time?.updated, next < current { return }
+        sessionSnapshot = value
+        appliedMetadata = ticket
+    }
 
     func refresh(_ api: API, session: Session, olderPage: Bool = false) async {
+        let currentTicket = nextTicket()
+        let revision = metadataRevision
         do {
             let sessionInfo: Item<Session> = try await api.request("/api/session/\(session.id)")
             var path = "/api/session/\(session.id)/message?limit=50"
             if olderPage, let cursor = olderCursor { path += "&cursor=" + API.escape(cursor) }
             else { path += "&order=desc" }
             let page: Page<Message> = try await api.request(path)
-            if olderPage { older += page.data } else { newest = page.data }
             if olderPage || !refreshed { olderCursor = page.cursor?.next }
-            var merged = Dictionary(older.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
-            // Preserve already-seen messages even when the newest page moves forward.
-            for message in messages { merged[message.id] = message }
-            for message in newest { merged[message.id] = message }
-            messages = merged.values.filter(\.visible).sorted {
-                $0.time.created == $1.time.created ? $0.id < $1.id : $0.time.created < $1.time.created
-            }
+            applyMessages(page, ticket: currentTicket, older: olderPage)
             let requests: Page<Permission> = try await api.request("/api/session/\(session.id)/permission")
-            permissions = requests.data
             let questionsPage: Page<QuestionForm> = try await api.request("/api/session/\(session.id)/form")
+            guard currentTicket >= appliedFull else { return }
+            appliedFull = currentTicket
+            permissions = requests.data
             questions = questionsPage.data
+            permissionDetails = permissionDetails.filter { key, _ in requests.data.contains { $0.id == key } }
             for request in requests.data {
                 guard permissionDetails[request.id] == nil, let source = request.source else { continue }
                 var message = messages.first { $0.id == source.messageID }
@@ -51,17 +77,65 @@ final class ChatStore: ObservableObject {
                 }
             }
             error = nil
-            sessionSnapshot = sessionInfo.data
+            applySession(sessionInfo.data, ticket: currentTicket, revision: revision)
             refreshed = true
         } catch is CancellationError { }
         catch let failure as URLError where failure.code == .cancelled { }
         catch { self.error = error.localizedDescription }
     }
 
+    func receiveEvent(_ type: String, api: API, session: Session) {
+        liveConnected = true
+        dirty = true
+        let lower = type.lowercased()
+        fullDirty = fullDirty || lower.contains("permission") || lower.contains("form") || type == "connected" || !refreshed
+        guard pump == nil else { return }
+        let generation = pumpRevision
+        pump = Task {
+            defer { if generation == pumpRevision { pump = nil } }
+            while dirty && !Task.isCancelled && generation == pumpRevision {
+                let full = fullDirty
+                dirty = false
+                fullDirty = false
+                do { try await Task.sleep(for: .milliseconds(300)) } catch { break }
+                if full { await refresh(api, session: session) }
+                else { await refreshStreaming(api, session: session) }
+            }
+        }
+    }
+    func stopLiveUpdates() {
+        pumpRevision &+= 1
+        pump?.cancel()
+        pump = nil
+        dirty = false
+        liveConnected = false
+    }
+    private func refreshStreaming(_ api: API, session: Session) async {
+        let currentTicket = nextTicket()
+        let revision = metadataRevision
+        do {
+            let info: Item<Session> = try await api.request("/api/session/\(session.id)")
+            let page: Page<Message> = try await api.request("/api/session/\(session.id)/message?limit=5&order=desc&type=assistant")
+            try Task.checkCancellation()
+            applyMessages(page, ticket: currentTicket)
+            applySession(info.data, ticket: currentTicket, revision: revision)
+        } catch { liveConnected = false }
+    }
+    func changeAgent(_ agent: String, api: API, session: Session) async throws -> Session {
+        metadataRevision &+= 1
+        let _: EmptyResponse = try await api.request("/api/session/\(session.id)/agent", method: "POST", body: ["agent": agent])
+        let confirmed: Item<Session> = try await api.request("/api/session/\(session.id)")
+        guard confirmed.data.agent == agent else { throw PhoneError.message("Servidor ainda não confirmou modo solicitado. Confira estado antes de tentar novamente.") }
+        metadataRevision &+= 1
+        sessionSnapshot = confirmed.data
+        return confirmed.data
+    }
+
     func send(_ api: API, session: Session, text: String, files: [PendingFile] = []) async -> Bool {
         guard !sending else { return false }
         sending = true
         defer { sending = false }
+        var attempted = false
         do {
             try PendingFile.validate(files)
             if !files.isEmpty, let model = session.model {
@@ -81,15 +155,18 @@ final class ChatStore: ObservableObject {
             }
             var body = content
             body["id"] = pendingID!
+            attempted = true
             let _: Accepted = try await api.request("/api/session/\(session.id)/prompt", method: "POST",
                                                   body: body)
             pendingID = nil
             pendingFingerprint = nil
             sendError = nil
+            sendUnconfirmed = false
             await refresh(api, session: session)
             return true
         } catch {
-            self.sendError = "Envio não confirmado: \(error.localizedDescription) Confira conversa antes de tentar novamente. Texto e anexos foram mantidos."
+            if attempted { sendUnconfirmed = true }
+            self.sendError = (attempted ? "Envio não confirmado: " : "Não foi enviado: ") + error.localizedDescription + " Confira conversa antes de tentar novamente. Texto e anexos foram mantidos."
             return false
         }
     }

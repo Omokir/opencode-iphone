@@ -94,6 +94,7 @@ struct SessionsView: View {
     @State private var settings = false
     @State private var create = false
     @State private var phoneControl = false
+    @State private var fileBrowser = false
     @State private var hostStatus: HostStatus?
     @State private var hostChecked: Date?
     @State private var hostStatusFailed = false
@@ -162,7 +163,12 @@ struct SessionsView: View {
             .navigationTitle("Conversas")
             .navigationDestination(for: Session.self) { ChatView(session: $0) }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Ajustes", systemImage: "slider.horizontal.3") { settings = true } }
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 16) {
+                        Button("Ajustes", systemImage: "slider.horizontal.3") { settings = true }
+                        Button("Arquivos do notebook", systemImage: "folder") { fileBrowser = true }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) { Button("Nova conversa", systemImage: "square.and.pencil") { create = true } }
             }
             .overlay { if busy && sessions.isEmpty { ProgressView() } }
@@ -170,7 +176,7 @@ struct SessionsView: View {
             .task(id: phase) {
                 guard phase == .active else { return }
                 while !Task.isCancelled {
-                    if path.isEmpty && !settings && !phoneControl {
+                    if path.isEmpty && !settings && !phoneControl && !fileBrowser {
                         await load()
                         if Date().timeIntervalSince(quotaChecked) > 60 { await loadQuota() }
                     }
@@ -180,6 +186,7 @@ struct SessionsView: View {
             .onChange(of: path.count) { _, count in if count == 0 { Task { await load() } } }
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $phoneControl) { PhoneControlView() }
+            .sheet(isPresented: $fileBrowser) { FileBrowserView() }
             .alert("Nova conversa", isPresented: $create) {
                 TextField("Pasta no notebook", text: $directory).textInputAutocapitalization(.never).autocorrectionDisabled()
                 Button("Criar") { Task { await newSession() } }
@@ -264,7 +271,7 @@ struct SessionsView: View {
     }
 }
 
-struct ChatView: View {
+@MainActor struct ChatView: View {
     @EnvironmentObject var api: API
     @EnvironmentObject var unread: UnreadStore
     @Environment(\.scenePhase) var phase
@@ -285,6 +292,19 @@ struct ChatView: View {
     @State private var controlSummary = "Consultando automação…"
     @State private var controlCheck = Date.distantPast
     @State private var stoppingControl = false
+    @State private var modeError: String?
+    @State private var fileBrowser = false
+    @State private var preview: LocalPreview?
+    @State private var following = true
+    @State private var scrollInteracting = false
+    @State private var bottomY: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
+    @State private var draftLoaded = false
+    @State private var draftRecoveryBlocked = false
+    @State private var draftSavedAt: Date?
+    @State private var draftError: String?
+    @State private var draftSaveTask: Task<Void, Never>?
+    private let drafts = DraftStore()
     init(session: Session) {
         _session = State(initialValue: session)
         #if SNAPSHOT
@@ -311,15 +331,27 @@ struct ChatView: View {
                     } label: {
                         Label(agent.capitalized, systemImage: agent == "plan" ? "list.bullet.clipboard" : "hammer")
                             .font(.subheadline.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
-                            .background(session.agent == agent ? Style.blue.opacity(0.12) : Color.clear, in: Capsule())
+                            .background((session.agent ?? "build") == agent ? Style.blue.opacity(0.12) : Color.clear, in: Capsule())
+                            .contentShape(Capsule())
                     }.disabled(changingAgent || store.sending)
-                        .accessibilityAddTraits(session.agent == agent ? .isSelected : [])
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("chat.mode." + agent)
+                        .accessibilityValue((session.agent ?? "build") == agent ? "Selecionado" : "")
+                        .accessibilityAddTraits((session.agent ?? "build") == agent ? .isSelected : [])
                 }
                 Spacer(minLength: 0)
                 Button { options = true } label: {
                     Text(session.model?.id ?? "Modelo").font(.system(.caption, design: .monospaced)).lineLimit(1)
                 }.accessibilityLabel("Selecionar modelo e ajustar conversa")
             }.padding(.horizontal).padding(.vertical, 6).background(.bar)
+            HStack {
+                Label(store.liveConnected ? "Ao vivo" : "Consulta periódica", systemImage: store.liveConnected ? "dot.radiowaves.left.and.right" : "arrow.clockwise")
+                    .foregroundStyle(store.liveConnected ? Color.green : .secondary)
+                Spacer()
+                if draftError != nil { Text("Rascunho não salvo").foregroundStyle(.red) }
+                else if draftSavedAt != nil && (!draft.isEmpty || !attachments.isEmpty) { Text("Rascunho salvo").foregroundStyle(.secondary) }
+                else if !draft.isEmpty || !attachments.isEmpty { Text("Salvando rascunho…").foregroundStyle(.secondary) }
+            }.font(.caption2).padding(.horizontal).padding(.vertical, 3)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 20) {
@@ -336,12 +368,28 @@ struct ChatView: View {
                         if store.messages.isEmpty && store.refreshed {
                             ContentUnavailableView("Converse com notebook", systemImage: "text.bubble", description: Text("Envie tarefa para começar."))
                         }
-                        Color.clear.frame(height: 1).id("bottom")
+                        Color.clear.frame(height: 1).id("bottom").background(GeometryReader { geometry in
+                            Color.clear.preference(key: ChatBottomPreference.self, value: geometry.frame(in: .named("chat-scroll")).maxY)
+                        })
                     }.padding()
                 }
+                .coordinateSpace(name: "chat-scroll")
+                .background(GeometryReader { geometry in Color.clear.preference(key: ChatHeightPreference.self, value: geometry.size.height) })
                 .defaultScrollAnchor(.bottom)
-                .onChange(of: store.messages.count) { old, new in
-                    if old == 0 || (new > old && !store.loadingOlder) { proxy.scrollTo("bottom", anchor: .bottom) }
+                .modifier(ChatScrollInteraction(following: $following, interacting: $scrollInteracting, bottom: bottomY, height: viewportHeight))
+                .onPreferenceChange(ChatHeightPreference.self) { viewportHeight = $0 }
+                .onPreferenceChange(ChatBottomPreference.self) { value in
+                    bottomY = value
+                    if !scrollInteracting && value <= viewportHeight + 80 { following = true }
+                }
+                .onChange(of: store.renderRevision) { _, _ in
+                    if following && !scrollInteracting && !store.loadingOlder { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if !following {
+                        Button("Últimas mensagens", systemImage: "arrow.down") { following = true; proxy.scrollTo("bottom", anchor: .bottom) }
+                            .font(.caption.weight(.semibold)).buttonStyle(.borderedProminent).padding(10)
+                    }
                 }
             }
             if let error = store.error {
@@ -357,6 +405,7 @@ struct ChatView: View {
                     Button("Fechar aviso") { store.sendError = nil }.font(.caption2)
                 }.padding(10)
             }
+            if let draftError { Text(draftError).font(.caption).foregroundStyle(.red).padding(.horizontal) }
             ForEach(store.questions) { form in
                 Button { question = form } label: {
                     HStack {
@@ -385,13 +434,10 @@ struct ChatView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
                         ForEach(attachments) { file in
-                            HStack(spacing: 6) {
-                                Image(systemName: file.category == "image" ? "photo" : "doc")
-                                Text(file.name).lineLimit(1)
-                                Text(ByteCountFormatter.string(fromByteCount: Int64(file.data.count), countStyle: .file)).foregroundStyle(.secondary)
-                                Button { attachments.removeAll { $0.id == file.id } } label: { Image(systemName: "xmark.circle.fill") }
-                                    .accessibilityLabel("Remover \(file.name)").disabled(store.sending)
-                            }.font(.caption).padding(10).background(Style.paper, in: Capsule())
+                            AttachmentChip(file: file, disabled: store.sending) {
+                                do { preview = try PrivateTransferFiles.preview(file) }
+                                catch { store.sendError = error.localizedDescription }
+                            } remove: { attachments.removeAll { $0.id == file.id } }
                         }
                     }.padding(.horizontal).padding(.top, 8)
                 }
@@ -425,12 +471,15 @@ struct ChatView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Nome, modo e modelo", systemImage: "slider.horizontal.3") { options = true }
+                    Button("Arquivos do projeto", systemImage: "folder") { fileBrowser = true }
                     Button("Interromper tarefa", systemImage: "stop.circle", role: .destructive) { stop = true }
                 } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Opções da conversa")
             }
         }
         .sheet(isPresented: $options) { ChatOptionsView(session: $session) }
         .sheet(isPresented: $controlPanel) { PhoneControlView() }
+        .sheet(isPresented: $fileBrowser) { FileBrowserView(initialDirectory: session.location.directory) }
+        .sheet(item: $preview) { FilePreviewView(file: $0) }
         .sheet(item: $question) { form in
             QuestionFormView(question: form, session: session) { Task { await store.refresh(api, session: session) } }
         }
@@ -463,20 +512,79 @@ struct ChatView: View {
         .confirmationDialog("Interromper tarefa no notebook?", isPresented: $stop) {
             Button("Interromper", role: .destructive) { Task { await store.interrupt(api, session: session) } }
         }
+        .alert("Troca de modo não confirmada", isPresented: Binding(get: { modeError != nil }, set: { if !$0 { modeError = nil } })) {
+            Button("Entendi", role: .cancel) { modeError = nil }
+        } message: { Text(modeError ?? "") }
+        .onAppear { restoreDraft() }
+        .onDisappear { draftSaveTask?.cancel(); saveDraft(); store.stopLiveUpdates() }
+        .onChange(of: draft) { _, _ in scheduleDraft() }
+        .onChange(of: attachments.map(\.id)) { _, _ in scheduleDraft() }
+        .onChange(of: store.sendUnconfirmed) { _, _ in scheduleDraft() }
+        .onChange(of: phase) { _, value in if value != .active { draftSaveTask?.cancel(); saveDraft() } }
+        .onChange(of: store.sessionSnapshot) { _, value in
+            guard !changingAgent, let value, value.id == session.id else { return }
+            session = value
+            markReadIfVisible(value)
+        }
+        .task(id: phase) {
+            guard phase == .active else { return }
+            defer { store.liveConnected = false }
+            var delay = 1
+            while !Task.isCancelled {
+                do {
+                    try await api.watchSession(session.id) { type in store.receiveEvent(type, api: api, session: session) }
+                    delay = 1
+                    store.liveConnected = false
+                } catch { store.liveConnected = false }
+                do { try await Task.sleep(for: .seconds(delay)) } catch { break }
+                delay = min(10, delay * 2)
+            }
+        }
         .task(id: phase) {
             guard phase == .active else { return }
             while !Task.isCancelled {
                 await store.refresh(api, session: session)
                 guard phase == .active && !Task.isCancelled else { return }
-                if store.error == nil && !options && !controlPanel && !selectingFiles && !selectingPhotos && question == nil, let snapshot = store.sessionSnapshot {
-                    unread.markRead(snapshot, server: api.server)
-                }
+                if let snapshot = store.sessionSnapshot { markReadIfVisible(snapshot) }
                 if session.isPhoneControl && Date().timeIntervalSince(controlCheck) > 5 {
                     await refreshControl()
                 }
-                do { try await Task.sleep(for: .seconds(store.error == nil ? 2 : 5)) } catch { break }
+                do { try await Task.sleep(for: .seconds(5)) } catch { break }
             }
         }
+    }
+    func markReadIfVisible(_ snapshot: Session) {
+        if phase == .active && store.error == nil && !options && !controlPanel && !fileBrowser && preview == nil && !selectingFiles && !selectingPhotos && question == nil {
+            unread.markRead(snapshot, server: api.server)
+        }
+    }
+    func restoreDraft() {
+        guard !draftLoaded && !draftRecoveryBlocked else { return }
+        do {
+            if let restored = try drafts.load(server: api.server, sessionID: session.id) {
+                draft = restored.text; attachments = restored.files; store.sendUnconfirmed = restored.unconfirmed
+                if restored.unconfirmed { store.sendError = "Rascunho de envio não confirmado recuperado. Confira conversa antes de enviar de novo; nada foi reenviado automaticamente." }
+            }
+        } catch {
+            draftRecoveryBlocked = true
+            draftError = "Não foi possível recuperar rascunho: \(error.localizedDescription). Original foi preservado; alterações atuais não serão salvas por cima dele."
+            return
+        }
+        draftLoaded = true
+        scheduleDraft()
+    }
+    func scheduleDraft() {
+        guard draftLoaded else { return }
+        draftSavedAt = nil
+        draftSaveTask?.cancel()
+        draftSaveTask = Task { do { try await Task.sleep(for: .milliseconds(350)); saveDraft() } catch { } }
+    }
+    func saveDraft() {
+        guard draftLoaded else { return }
+        do {
+            try drafts.save(server: api.server, sessionID: session.id, text: draft, files: attachments, unconfirmed: store.sendUnconfirmed)
+            draftSavedAt = Date(); draftError = nil
+        } catch { draftError = "Rascunho não salvo: \(error.localizedDescription)" }
     }
     func append(_ file: PendingFile) throws {
         try PendingFile.validate(attachments + [file])
@@ -503,15 +611,13 @@ struct ChatView: View {
         } catch { store.sendError = "Parada não confirmada. Bloqueie iPhone ou desconecte cabo. \(error.localizedDescription)" }
     }
     func switchAgent(_ agent: String) async {
-        guard agent != session.agent else { return }
+        guard !changingAgent, agent != (session.agent ?? "build") else { return }
         changingAgent = true
         defer { changingAgent = false }
         do {
-            let _: EmptyResponse = try await api.request("/api/session/\(session.id)/agent", method: "POST", body: ["agent": agent])
-            let updated: Item<Session> = try await api.request("/api/session/\(session.id)")
-            session = updated.data
-            store.error = nil
-        } catch { store.error = error.localizedDescription }
+            session = try await store.changeAgent(agent, api: api, session: session)
+            modeError = nil
+        } catch { modeError = error.localizedDescription }
     }
 }
 

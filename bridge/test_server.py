@@ -1,4 +1,7 @@
 import json
+import hashlib
+import io
+import uuid
 from pathlib import Path
 import tempfile
 import threading
@@ -20,6 +23,7 @@ class GatewayTests(unittest.TestCase):
         self.http = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
         self.http.phone_control = server.PhoneControl(self.state, lambda *args: server.upstream(*args))
         self.http.codex_usage = server.CodexUsage(reader=lambda: {'account': None})
+        self.http.files = server.FileBrowser(self.state, roots={'home': {'name': 'Fixture', 'path': str(self.state)}})
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
 
@@ -167,6 +171,55 @@ class GatewayTests(unittest.TestCase):
         with patch.object(server, 'upstream') as upstream:
             self.assertEqual(self.request('/api/session/ses_123/form/form_1/reply', 'test-token', {'answer': {'direction': 'plan'}})[0], 409)
             upstream.assert_not_called()
+
+    def test_file_transfer_wire_roundtrip_and_auth(self):
+        base = f'http://127.0.0.1:{self.http.server_port}'
+        payload = b'wire fixture'
+        identifier = str(uuid.uuid4())
+        headers = {'Authorization': 'Bearer test-token', 'Content-Type': 'application/octet-stream',
+                   'X-Upload-ID': identifier, 'X-Content-SHA256': hashlib.sha256(payload).hexdigest(), 'If-None-Match': '*'}
+        request = urllib.request.Request(base + '/phone/files/upload?root=home&path=fixture.txt', data=payload, headers=headers)
+        with urllib.request.urlopen(request) as response:
+            receipt = json.load(response)
+        self.assertEqual(receipt['sha256'], hashlib.sha256(payload).hexdigest())
+        with urllib.request.urlopen(urllib.request.Request(base + '/phone/files/download?root=home&path=fixture.txt', headers={'Authorization': 'Bearer test-token'})) as response:
+            self.assertEqual(response.read(), payload)
+            self.assertEqual(response.headers['X-Content-SHA256'], receipt['sha256'])
+        self.assertEqual(self.request('/phone/files/roots')[0], 401)
+        self.assertFalse(server.allowed('DELETE', '/phone/files/download'))
+
+    def test_message_projection_omits_inline_file_data(self):
+        body = b'{"data":[{"id":"msg_1","type":"user","files":[{"name":"photo.png","mime":"image/png","data":"private-base64","source":{"uri":"private"}}]}]}'
+        projected = json.loads(server.mobile_messages(body))
+        self.assertEqual(projected['data'][0]['files'], [{'name': 'photo.png', 'mime': 'image/png'}])
+        self.assertNotIn('private-base64', json.dumps(projected))
+        tools = {'data': {'id': 'msg_2', 'type': 'assistant', 'content': [
+            {'type': 'tool', 'state': {'status': 'running', 'input': {'code': 'review this'}, 'content': ['large-output']}},
+            {'type': 'tool', 'state': {'status': 'completed', 'input': {'code': 'old-input'}, 'content': ['large-output']}}]}}
+        result = json.loads(server.mobile_messages(json.dumps(tools).encode()))
+        self.assertEqual(result['data']['content'][0]['state']['input'], {'code': 'review this'})
+        self.assertNotIn('large-output', json.dumps(result))
+        self.assertNotIn('old-input', json.dumps(result))
+
+    def test_sse_stream_forwards_hints_not_other_sessions_or_content(self):
+        own = json.dumps({'type': 'session.message.delta', 'data': {'sessionID': 'ses_own', 'text': 'private-own-text'}})
+        other = json.dumps({'type': 'session.message.delta', 'data': {'sessionID': 'ses_other', 'text': 'private-other-text'}})
+        wire = ('data: ' + own + '\n\n' + 'data: ' + other + '\n\n').encode()
+        base = f'http://127.0.0.1:{self.http.server_port}'
+        original_open = urllib.request.urlopen
+        def open_core_or_client(request, *args, **kwargs):
+            if isinstance(request, urllib.request.Request) and request.full_url == 'http://core.invalid/events':
+                return io.BytesIO(wire)
+            return original_open(request, *args, **kwargs)
+        with patch.object(server, 'core_request', return_value=urllib.request.Request('http://core.invalid/events')), patch.object(urllib.request, 'urlopen', side_effect=open_core_or_client):
+            request = urllib.request.Request(base + '/phone/session/ses_own/events', headers={'Authorization': 'Bearer test-token'})
+            with original_open(request, timeout=5) as response:
+                body = response.read().decode()
+                self.assertIn('text/event-stream', response.headers['Content-Type'])
+        self.assertIn('ses_own', body)
+        self.assertNotIn('ses_other', body)
+        self.assertNotIn('private-own-text', body)
+        self.assertNotIn('private-other-text', body)
 
 
 if __name__ == '__main__':
