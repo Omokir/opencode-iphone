@@ -13,6 +13,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Gateway tests
         run: python3 -m unittest discover -s bridge -v
+      - name: Native model regression tests
+        run: |
+          mkdir -p build
+          xcrun swiftc -parse-as-library ios/Models.swift tests/ModelsTest.swift -o build/models-test
+          build/models-test
       - name: Build native iPhone IPA
         run: bash scripts/build-ios.sh
       - name: Launch native app in iPhone simulator

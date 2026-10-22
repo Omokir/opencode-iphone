@@ -259,10 +259,10 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Notebook") {
+                Section {
                     Text(api.server).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     Toggle("Manter notebook acordado", isOn: Binding(get: { awake }, set: { value in Task { await setAwake(value) } })).disabled(!loaded || busy)
-                } footer: {
+                } header: { Text("Notebook") } footer: {
                     Text("Ligado: evita suspensão com tampa fechada. Mantenha notebook ventilado e na tomada. Desligado: restaura energia; conexão pode cair se notebook suspender.")
                 }
                 Section {

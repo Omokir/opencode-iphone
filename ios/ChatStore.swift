@@ -44,7 +44,7 @@ final class ChatStore: ObservableObject {
         sending = true
         defer { sending = false }
         if pendingText != text || pendingID == nil {
-            pendingID = "msg" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            pendingID = RequestID.message()
             pendingText = text
         }
         do {

@@ -1,5 +1,11 @@
 import Foundation
 
+enum RequestID {
+    static func message() -> String {
+        "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    }
+}
+
 struct Page<T: Decodable>: Decodable {
     let data: [T]
     let cursor: Cursor?
