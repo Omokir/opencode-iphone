@@ -11,6 +11,11 @@ enum Style {
 @main
 struct OpenCodePhoneApp: App {
     @StateObject private var api = API()
+    #if SNAPSHOT
+    @StateObject private var unread = UnreadStore(defaults: UserDefaults(suiteName: "snapshot-" + UUID().uuidString)!)
+    #else
+    @StateObject private var unread = UnreadStore()
+    #endif
     var body: some Scene {
         WindowGroup {
             Group {
@@ -21,6 +26,7 @@ struct OpenCodePhoneApp: App {
                 #endif
             }
             .environmentObject(api)
+            .environmentObject(unread)
             .tint(Style.blue)
         }
     }
@@ -74,6 +80,8 @@ struct ConnectView: View {
 
 struct SessionsView: View {
     @EnvironmentObject var api: API
+    @EnvironmentObject var unread: UnreadStore
+    @Environment(\.scenePhase) var phase
     @State private var sessions: [Session] = []
     @State private var cursor: String?
     @State private var path: [Session] = []
@@ -82,6 +90,9 @@ struct SessionsView: View {
     @State private var settings = false
     @State private var create = false
     @State private var phoneControl = false
+    @State private var hostStatus: HostStatus?
+    @State private var hostChecked: Date?
+    @State private var hostStatusFailed = false
     @State private var directory = "/home/omoki"
     var body: some View {
         NavigationStack(path: $path) {
@@ -97,6 +108,9 @@ struct SessionsView: View {
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 Section {
+                    HostBatteryView(status: hostStatus, stale: hostStatusFailed || api.reachable == false || (hostChecked.map { Date().timeIntervalSince($0) > 15 } ?? false))
+                }
+                Section {
                     Button { phoneControl = true } label: {
                         Label("Controlar meu iPhone", systemImage: "iphone.gen3.radiowaves.left.and.right")
                             .font(.headline).padding(.vertical, 6)
@@ -106,11 +120,18 @@ struct SessionsView: View {
                 Section("Conversas") {
                     ForEach(sessions) { session in
                         NavigationLink(value: session) {
+                            HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(session.title ?? "Sem título").font(.headline).lineLimit(2)
                                 Text(session.location.directory).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                             }.padding(.vertical, 5)
+                                Spacer(minLength: 0)
+                                if unread.isUnread(session, server: api.server) {
+                                    Circle().fill(Style.blue).frame(width: 9, height: 9).accessibilityHidden(true)
+                                }
+                            }
                         }
+                        .accessibilityValue(unread.isUnread(session, server: api.server) ? "Resposta não lida" : "")
                     }
                     if sessions.isEmpty && !busy { Text("Crie conversa ou puxe para atualizar.").foregroundStyle(.secondary) }
                     if cursor != nil { Button("Carregar mais") { Task { await load(more: true) } }.disabled(busy) }
@@ -124,7 +145,13 @@ struct SessionsView: View {
             }
             .overlay { if busy && sessions.isEmpty { ProgressView() } }
             .refreshable { await load() }
-            .task { await load() }
+            .task(id: phase) {
+                guard phase == .active else { return }
+                while !Task.isCancelled {
+                    if path.isEmpty && !settings && !phoneControl { await load() }
+                    do { try await Task.sleep(for: .seconds(5)) } catch { break }
+                }
+            }
             .onChange(of: path.count) { _, count in if count == 0 { Task { await load() } } }
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $phoneControl) { PhoneControlView() }
@@ -143,10 +170,16 @@ struct SessionsView: View {
             var url = "/api/session?limit=30&archived=false&parentID=null"
             if more, let cursor { url += "&cursor=" + API.escape(cursor) } else { url += "&order=desc" }
             let page: Page<Session> = try await api.request(url)
+            unread.initialize(server: api.server, sessions: page.data)
             if more { sessions += page.data.filter { s in !sessions.contains(where: { $0.id == s.id }) } }
             else { sessions = page.data }
             cursor = page.cursor?.next
             error = nil
+            do {
+                hostStatus = try await api.request("/phone/status")
+                hostChecked = Date()
+                hostStatusFailed = false
+            } catch { hostStatusFailed = true }
         } catch { self.error = "Não foi possível acessar notebook: \(error.localizedDescription)" }
     }
     func newSession() async {
@@ -161,6 +194,7 @@ struct SessionsView: View {
 
 struct ChatView: View {
     @EnvironmentObject var api: API
+    @EnvironmentObject var unread: UnreadStore
     @Environment(\.scenePhase) var phase
     @State private var session: Session
     @StateObject private var store = ChatStore()
@@ -168,6 +202,7 @@ struct ChatView: View {
     @State private var stop = false
     @State private var options = false
     @State private var selectingFiles = false
+    @State private var selectingPhotos = false
     @State private var photos: [PhotosPickerItem] = []
     @State private var attachments: [PendingFile] = []
     @State private var importing = false
@@ -278,9 +313,7 @@ struct ChatView: View {
             HStack(alignment: .bottom, spacing: 12) {
                 Menu {
                     Button("Arquivos", systemImage: "folder") { selectingFiles = true }
-                    PhotosPicker(selection: $photos, maxSelectionCount: max(1, 5 - attachments.count), matching: .images, photoLibrary: .shared()) {
-                        Label("Fotos", systemImage: "photo")
-                    }
+                    Button("Fotos", systemImage: "photo") { selectingPhotos = true }
                 } label: {
                     Image(systemName: importing ? "hourglass" : "plus.circle").font(.system(size: 28)).padding(.bottom, 4)
                 }.disabled(importing || store.sending || attachments.count >= 5).accessibilityLabel("Anexar fotos ou arquivos")
@@ -312,6 +345,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $options) { ChatOptionsView(session: $session) }
         .sheet(isPresented: $controlPanel) { PhoneControlView() }
+        .photosPicker(isPresented: $selectingPhotos, selection: $photos, maxSelectionCount: max(1, 5 - attachments.count), matching: .images, preferredItemEncoding: .compatible)
         .fileImporter(isPresented: $selectingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             Task {
                 importing = true
@@ -344,6 +378,10 @@ struct ChatView: View {
             guard phase == .active else { return }
             while !Task.isCancelled {
                 await store.refresh(api, session: session)
+                guard phase == .active && !Task.isCancelled else { return }
+                if store.error == nil, let snapshot = store.sessionSnapshot {
+                    unread.markRead(snapshot, server: api.server)
+                }
                 if session.isPhoneControl && Date().timeIntervalSince(controlCheck) > 5 {
                     await refreshControl()
                 }
@@ -445,7 +483,9 @@ struct SettingsView: View {
                 }
                 Section {
                     Text("Tarefas continuam no notebook ao sair do app. Atualizações aparecem quando você volta. Sem notificações push nesta versão.")
+                    Text("Bolinha na lista indica resposta concluída ainda não aberta neste iPhone. Atualiza com app ativo ou ao reabrir; não é notificação em segundo plano.")
                     Text("Código de conexão é de uso único. Acesso fica no Chaves deste iPhone. Nunca informe senha Apple aqui.")
+                    LabeledContent("Versão", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 Button("Desconectar este iPhone", role: .destructive) { api.disconnect(); dismiss() }

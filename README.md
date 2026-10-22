@@ -14,6 +14,10 @@ Native SwiftUI remote client for OpenCode V2. iOS 17+; no webview, no embedded t
 - Visible provider errors, attachment history and bounded uploads.
 - iPhone control panel, expiring consent, isolated control conversation,
   reviewed one-action permissions and a Stop control for normal MCP automation.
+- Per-device unread dots for completed conversations; persisted IDs/timestamps,
+  automatic foreground refresh, no push/background delivery claim.
+- Notebook battery on conversation list: percentage, charging/AC and low-battery
+  warning, with unavailable/stale states rather than a fabricated reading.
 - HTTPS over private Tailscale network; one-time, five-minute pairing code.
 - Device-only Keychain token storage; no provider or Apple credentials in app.
 
@@ -61,7 +65,18 @@ outside repository, private to user, never committed. Rate limit: 5 attempts/min
 Build, signing, installation, and launch are separate verification stages.
 
 Simulator screenshots use synthetic fixtures compiled with `-D SNAPSHOT`.
+The photo-picker regression additionally drives a real simulator picker using
+synthetic media: attachments menu, Photos, system picker, Cancel back to chat.
 These fixtures are excluded from device IPA builds. No real chat contents,
 provider credentials, pairing codes or access tokens go to CI.
 
 Control scope, host gate and signing/runtime limitations: [PHONE-CONTROL.md](docs/PHONE-CONTROL.md).
+
+## Unread markers
+
+The initial server-time baseline avoids marking all older history unread after
+upgrade. New completed/failed/interrupted turns get a dot unless viewed in the
+active conversation. Opening and successfully loading the chat clears the dot.
+State persists on this iPhone only; desktop read markers are not modified.
+No polling is promised while iOS suspends the app. The list refreshes while
+foregrounded and on return, without automatically replaying failed sends.

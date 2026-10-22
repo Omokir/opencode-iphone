@@ -18,6 +18,13 @@ struct Session: Decodable, Identifiable, Hashable {
     let location: Location
     let model: Model?
     let agent: String?
+    let time: Time?
+    let outcome: String?
+    struct Time: Decodable { let created: Double; let updated: Double; let idle: Double? }
+    var completionStamp: Double? {
+        guard ["succeeded", "failed", "interrupted"].contains(outcome ?? "") else { return nil }
+        return time?.idle
+    }
     let metadata: Metadata?
     struct Metadata: Decodable { let phoneControl: Bool? }
     var isPhoneControl: Bool { metadata?.phoneControl == true }
@@ -95,9 +102,39 @@ indirect enum JSONValue: Codable {
     }
 }
 struct Awake: Decodable { let awake: Bool }
+struct HostStatus: Decodable {
+    let awake: Bool
+    let battery: Battery?
+    struct Battery: Decodable {
+        let available: Bool
+        let percentage: Int?
+        let charging: Bool?
+        let onAC: Bool?
+        let state: String?
+    }
+}
 struct PairResponse: Decodable { let token: String }
 struct Accepted: Decodable { let data: AcceptedID; struct AcceptedID: Decodable { let id: String } }
 struct EmptyResponse: Decodable {}
+
+struct ReadState: Codable {
+    var baselines: [String: Double] = [:]
+    var viewed: [String: Double] = [:]
+    mutating func initialize(server: String, sessions: [Session]) {
+        guard baselines[server] == nil else { return }
+        // Baseline uses server timestamps, never the iPhone's possibly skewed clock.
+        baselines[server] = sessions.compactMap { $0.time?.updated }.max() ?? 0
+    }
+    func isUnread(_ session: Session, server: String) -> Bool {
+        guard let stamp = session.completionStamp, stamp > 0 else { return false }
+        return stamp > (viewed[server + "|" + session.id] ?? baselines[server] ?? 0)
+    }
+    mutating func markRead(_ session: Session, server: String) {
+        guard let stamp = session.completionStamp else { return }
+        let key = server + "|" + session.id
+        viewed[key] = max(viewed[key] ?? 0, stamp)
+    }
+}
 struct ControlStatus: Decodable {
     let configured: Bool
     let enabled: Bool

@@ -58,3 +58,22 @@ saída de ferramentas ainda não estão incluídos.
 
 Compilação, assinatura, instalação e teste no aparelho são etapas diferentes.
 Um teste no simulador não comprova funcionamento no seu iPhone.
+
+## Atualização 0.3.1
+
+- **Tela inicial:** bateria do notebook e bolinha de resposta não lida.
+- **Fotos:** seletor do sistema abre fora do menu de anexos.
+- **Controlar meu iPhone:** painel com conexão, autorização de 15 minutos e
+  conversa dedicada. Cada ação mutável pede revisão e confirmação individual.
+- **Parar:** permanece visível no painel e na conversa de controle. Bloqueia
+  novas chamadas normais do MCP e solicita interrupção, sem desfazer ações.
+- **Envios:** falha não confirmada mantém texto/anexos, com aviso persistente.
+
+Bolinha atualiza com app ativo ou ao reabrir. Não há push; leitura é armazenada
+só neste iPhone e não altera indicadores do notebook. Histórico antigo não vira
+todo não lido no primeiro uso após atualização.
+
+Controle foi testado por USB, desbloqueado. Após reinício ou expiração da
+assinatura, suporte de desenvolvimento/agente pode precisar de preparação no
+notebook. Se perder VPN ou rede, não presuma que botão Parar chegou ao notebook:
+bloqueie iPhone ou desconecte cabo. Outras conversas mantêm permissões próprias.

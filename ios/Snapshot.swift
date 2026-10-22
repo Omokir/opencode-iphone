@@ -7,6 +7,7 @@ import SwiftUI
     static var object: [String: Any] = [
         "id": "ses_demo", "title": "Controle do meu iPhone", "agent": "build",
         "metadata": ["phoneControl": true],
+        "time": ["created": 1, "updated": 300, "idle": 300], "outcome": "succeeded",
         "location": ["directory": "/workspace/meu-app"],
         "model": ["providerID": "openai", "id": "gpt-6.1-sol-ultrafast"]
     ]
@@ -38,7 +39,7 @@ import SwiftUI
                       "sessionID": "ses_demo", "device": ["connected": true, "agentInstalled": true, "name": "Meu iPhone"],
                       "running": true, "pending": 1, "activity": "Aguardando sua confirmação", "ready": true]
         }
-        else if route == "/phone/status" { result = ["awake": true] }
+        else if route == "/phone/status" { result = ["awake": true, "battery": ["available": true, "percentage": 46, "charging": true, "onAC": true, "state": "Charging"]] }
         else if route == "/api/session" { result = ["data": [object]] }
         else if route.hasSuffix("/message") {
             result = ["data": [
@@ -64,6 +65,7 @@ struct SnapshotRoot: View {
     var body: some View {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--snapshot-chat") { NavigationStack { ChatView(session: session) } }
+        else if arguments.contains("--snapshot-sessions") { SnapshotConversationsView() }
         else if arguments.contains("--snapshot-control") { PhoneControlView() }
         else if arguments.contains("--snapshot-options") { ChatOptionsView(session: $session) }
         else if arguments.contains("--snapshot-models") {
@@ -71,6 +73,24 @@ struct SnapshotRoot: View {
             ModelPickerView(models: models, selection: session.model?.key ?? "") { _ in }
         }
         else { ConnectView() }
+    }
+}
+
+struct SnapshotConversationsView: View {
+    @EnvironmentObject var api: API
+    @EnvironmentObject var unread: UnreadStore
+    @State private var prepared = false
+    var body: some View {
+        if prepared { SessionsView() }
+        else {
+            ProgressView().task {
+                var old = Snapshot.object
+                old["time"] = ["created": 1, "updated": 100, "idle": 100]
+                let baseline = try! JSONDecoder().decode(Session.self, from: JSONSerialization.data(withJSONObject: old))
+                unread.initialize(server: api.server, sessions: [baseline])
+                prepared = true
+            }
+        }
     }
 }
 #endif

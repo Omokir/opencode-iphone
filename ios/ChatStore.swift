@@ -9,6 +9,7 @@ final class ChatStore: ObservableObject {
     @Published var sending = false
     @Published var sendError: String?
     @Published var permissionDetails: [String: String] = [:]
+    @Published var sessionSnapshot: Session?
     @Published var loadingOlder = false
     @Published var olderCursor: String?
     @Published var refreshed = false
@@ -19,6 +20,7 @@ final class ChatStore: ObservableObject {
 
     func refresh(_ api: API, session: Session, olderPage: Bool = false) async {
         do {
+            let sessionInfo: Item<Session> = try await api.request("/api/session/\(session.id)")
             var path = "/api/session/\(session.id)/message?limit=50"
             if olderPage, let cursor = olderCursor { path += "&cursor=" + API.escape(cursor) }
             else { path += "&order=desc" }
@@ -46,6 +48,7 @@ final class ChatStore: ObservableObject {
                 }
             }
             error = nil
+            sessionSnapshot = sessionInfo.data
             refreshed = true
         } catch is CancellationError { }
         catch let failure as URLError where failure.code == .cancelled { }

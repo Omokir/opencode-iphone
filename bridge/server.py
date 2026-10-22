@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from phone_control import PhoneControl
+from battery import battery_status
 
 STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
@@ -175,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/phone/status':
                 active = subprocess.run(['systemctl', '--user', 'is-active', '--quiet',
                                          'opencode-phone-mode.service']).returncode == 0
-                return self.reply(200, {'awake': active})
+                return self.reply(200, {'awake': active, 'battery': battery_status()})
             if path == '/phone/mode':
                 value = json.loads(body or b'{}').get('awake')
                 if not isinstance(value, bool):
