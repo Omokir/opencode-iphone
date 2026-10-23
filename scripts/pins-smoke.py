@@ -37,6 +37,14 @@ def wait_for(predicate):
 
 
 def conversation():
+    # Dashboard sections can place lazy List rows below the viewport. Reveal
+    # the fixture before waiting; waiting alone cannot materialize an offscreen row.
+    for _ in range(5):
+        found = next((e for e in tree() if e.get('type') == 'Button' and 'Controle do meu iPhone' in text(e)), None)
+        if found:
+            return found
+        command('io', 'swipe', '200,700,200,250', '--duration', '500')
+        time.sleep(0.4)
     return wait_for(lambda e: e.get('type') == 'Button' and 'Controle do meu iPhone' in text(e))
 
 
