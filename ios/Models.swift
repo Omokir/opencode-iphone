@@ -1,5 +1,15 @@
 import Foundation
 
+enum AgentProbeResponse {
+    static func isReady(_ data: Data) -> Bool {
+        struct Status: Decodable {
+            struct Value: Decodable { let ready: Bool }
+            let value: Value
+        }
+        return (try? JSONDecoder().decode(Status.self, from: data).value.ready) == true
+    }
+}
+
 enum SessionSearch {
     static func path(query: String, cursor: String? = nil) -> String {
         var components = URLComponents()

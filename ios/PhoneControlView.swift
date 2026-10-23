@@ -13,6 +13,9 @@ struct PhoneControlView: View {
     @State private var fetchError: String?
     @State private var notice: String?
     @State private var lastCheck: Date?
+    @State private var probing = false
+    @State private var probeResult: String?
+    @State private var probeTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -55,6 +58,23 @@ struct PhoneControlView: View {
                 } footer: {
                     Text("Parar bloqueia novas chamadas pelo MCP e solicita interrupção da conversa. Não desfaz ações já realizadas. Se perder conexão com notebook, parada não pode ser confirmada: bloqueie iPhone ou desconecte cabo.")
                 }
+                Section("Sem cabo — diagnóstico experimental") {
+                    Text("Teste somente de conexão ao agente neste iPhone. Não lê tela, não toca em apps e não libera automação.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button(probing ? "Verificando agente local…" : "Testar agente neste iPhone") {
+                        probing = true
+                        probeResult = nil
+                        probeTask = Task { @MainActor in
+                            let result = await LocalAgentProbe.check()
+                            guard !Task.isCancelled else { return }
+                            probeResult = result
+                            probing = false
+                        }
+                    }.disabled(probing)
+                    if let probeResult { Text(probeResult).font(.caption).textSelection(.enabled) }
+                    Text("Controle distante ainda não habilitado. Este teste verifica pré-requisito da futura ponte; nenhum endereço externo ou token é enviado ao agente.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Antes de começar") {
                     Label("Mantenha cabo conectado e iPhone desbloqueado. Bloqueio de tela não é detectado com certeza nesta versão.", systemImage: "cable.connector")
                     Label("Cada ação de toque, digitação ou abertura de app pede aprovação nesta conversa. Leia descrição antes de permitir.", systemImage: "hand.raised")
@@ -74,6 +94,10 @@ struct PhoneControlView: View {
                 }
             }
             .overlay { if busy { ProgressView() } }
+            .onDisappear { probeTask?.cancel(); probing = false }
+            .onChange(of: phase) { _, value in
+                if value != .active { probeTask?.cancel(); probing = false; probeResult = nil }
+            }
             .confirmationDialog("Liberar leitura da tela por 15 minutos?", isPresented: $consent, titleVisibility: .visible) {
                 Button("Liberar e abrir tarefa") { Task { await start() } }
                 Button("Cancelar", role: .cancel) { }

@@ -4,6 +4,11 @@ import Foundation
 struct ModelsTest {
     static func main() throws {
         let decoder = JSONDecoder()
+        precondition(AgentProbeResponse.isReady(Data(#"{"value":{"ready":true}}"#.utf8)))
+        for value in [#"{"value":{"ready":false}}"#, #"{"ready":true}"#, #"{"value":{"ready":"true"}}"#, "invalid"] {
+            precondition(!AgentProbeResponse.isReady(Data(value.utf8)))
+        }
+        print("PASS: local agent probe fails closed on malformed or non-ready responses")
         let capacity = StorageCapacity(totalBytes: 100_000_000_000, freeBytes: 25_000_000_000)
         precondition(capacity.usedPercent == 75 && capacity.freeGB == 25 && capacity.totalGB == 100)
         let searchURL = URLComponents(string: SessionSearch.path(query: "  Café & plano?  ", cursor: "opaque+/=&"))!
