@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import uuid
+from unittest.mock import patch
 from files import FileError
 from inbox import PhoneInbox
 
@@ -93,3 +94,21 @@ class InboxTests(unittest.TestCase):
         verified = self.inbox.verify(path, identifier)
         self.assertEqual(verified['size'], size)
         self.assertEqual(verified['sha256'], digest.hexdigest())
+
+    def test_destination_replacement_during_verify_is_rejected(self):
+        self.inbox.prepare()
+        path, identifier, _ = self.send()
+        from inbox import os
+        read = os.read
+        replaced = False
+        def swap(fd, length):
+            nonlocal replaced
+            data = read(fd, length)
+            if not replaced:
+                replaced = True
+                replacement = self.home / 'replacement'
+                replacement.write_bytes(b'other')
+                replacement.replace(self.home / path)
+            return data
+        with patch('inbox.os.read', side_effect=swap), self.assertRaises(FileError):
+            self.inbox.verify(path, identifier)

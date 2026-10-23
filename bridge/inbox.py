@@ -61,7 +61,8 @@ class PhoneInbox:
                         raise FileError(409, 'Destino mudou durante verificação.')
                     digest.update(chunk)
                     remaining -= len(chunk)
-                if version(initial) != version(os.fstat(fd)):
+                if (version(initial) != version(os.fstat(fd)) or
+                        version(initial) != version(os.stat(parts[-1], dir_fd=parent, follow_symlinks=False))):
                     raise FileError(409, 'Destino mudou durante verificação.')
                 return {'uploadID': identifier, 'root': 'home', 'path': path,
                         'size': initial.st_size, 'sha256': digest.hexdigest(), 'version': version(initial)}
