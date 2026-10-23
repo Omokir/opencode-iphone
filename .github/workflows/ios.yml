@@ -1,6 +1,11 @@
 name: Build iPhone
 on:
   workflow_dispatch:
+    inputs:
+      skip_simulator:
+        description: Build IPA without simulator UI tests (manual device testing)
+        type: boolean
+        default: false
   push:
     branches: [main]
 permissions:
@@ -25,6 +30,7 @@ jobs:
       - name: Build native iPhone IPA
         run: bash scripts/build-ios.sh
       - name: Launch native app in iPhone simulator
+        if: ${{ !inputs.skip_simulator }}
         run: bash scripts/simulator-smoke.sh
       - uses: actions/upload-artifact@v4
         with:
