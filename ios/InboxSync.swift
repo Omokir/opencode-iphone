@@ -38,6 +38,10 @@ import CryptoKit
         history.insert(InboxRecord(id: UUID(), name: name, path: path, serverKey: HistoryCache.key(server), date: Date(), removed: removed), at: 0)
         history = Array(history.prefix(100)); InboxRecord.save(history)
     }
+    private func mayContinue(_ api: API, server: String) -> Bool {
+        InboxAdmission.allows(connected: api.connected, enabledServer: enabledServer, currentServer: api.server,
+                              admittedServer: server, paused: paused, cancelled: Task.isCancelled)
+    }
     func sync(_ api: API) async {
         guard !busy, !paused, api.connected, enabledServer == api.server else { return }
         let server = api.server
@@ -52,7 +56,7 @@ import CryptoKit
             let _: BrowserLocation = try await api.request("/phone/inbox/prepare", method: "POST")
             for source in entries {
                 try Task.checkCancellation()
-                guard enabledServer == server, api.server == server, !paused else { return }
+                guard mayContinue(api, server: server) else { return }
                 let info = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
                 guard info.isRegularFile == true, info.isSymbolicLink != true else { continue }
                 activeName = source.lastPathComponent; activePhase = "Verificando"
@@ -66,14 +70,14 @@ import CryptoKit
                 else { identifier = UUID(); UserDefaults.standard.set(identifier.uuidString, forKey: key) }
                 let path = "Downloads/" + Self.folderName + "/" + identifier.uuidString.lowercased() + "-" + staged.name
                 let file = StagedUpload(id: identifier, url: staged.url, name: staged.name, size: staged.size, sha256: staged.sha256)
-                guard enabledServer == server, api.server == server, !paused else { return }
+                guard mayContinue(api, server: server) else { return }
                 totalBytes = file.size; completedBytes = 0; bytesPerSecond = 0
                 if try await verification(api, path: path, id: identifier) == nil {
                     status = "Enviando \(staged.name)…"
                     activePhase = "Enviando"
                     let started = Date()
                     var resumedAt: Int64?
-                    try await api.uploadResumable(file, path: path, permitted: { !self.paused && self.enabledServer == server && api.server == server }, progress: { bytes in
+                    try await api.uploadResumable(file, path: path, permitted: { self.mayContinue(api, server: server) }, progress: { bytes in
                         if resumedAt == nil { resumedAt = bytes }
                         self.completedBytes = bytes
                         self.bytesPerSecond = Double(bytes - (resumedAt ?? 0)) / max(0.1, Date().timeIntervalSince(started))
@@ -82,14 +86,14 @@ import CryptoKit
                 status = "Verificando conteúdo gravado: \(staged.name)…"
                 activePhase = "Verificando"
                 // A receipt alone is insufficient: re-read actual committed bytes.
-                guard enabledServer == server, api.server == server,
+                guard mayContinue(api, server: server),
                       let verified = try await verification(api, path: path, id: identifier),
                       verified.root == "home", verified.path == path,
                       verified.uploadID.lowercased() == identifier.uuidString.lowercased(),
                       verified.sha256 == file.sha256, verified.size == file.size else {
                     throw TransferFailure.message("Conteúdo no computador não confirmado. Original preservado.")
                 }
-                guard enabledServer == server, api.server == server, !paused, !Task.isCancelled else { return }
+                guard mayContinue(api, server: server) else { return }
                 if removeAfterTransfer {
                     try await Task.detached(priority: .utility) { try InboxLocalFiles.removeUnchanged(source, digest: file.sha256, size: file.size) }.value
                     UserDefaults.standard.removeObject(forKey: key)

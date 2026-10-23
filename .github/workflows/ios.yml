@@ -21,7 +21,7 @@ jobs:
       - name: Native model regression tests
         run: |
           mkdir -p build
-          xcrun swiftc -parse-as-library ios/Models.swift tests/ModelsTest.swift -o build/models-test
+          xcrun swiftc -parse-as-library ios/Models.swift ios/MessageBlocks.swift tests/ModelsTest.swift -o build/models-test
           build/models-test
           xcrun swiftc -parse-as-library -framework CryptoKit ios/HistoryCache.swift tests/CachePolicyTests.swift -o build/cache-test
           build/cache-test

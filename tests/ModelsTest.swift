@@ -4,6 +4,18 @@ import Foundation
 struct ModelsTest {
     static func main() throws {
         let decoder = JSONDecoder()
+        precondition(MessageBlock.parse("```swift\nprint(1)\n```") == [.code("swift", "print(1)")])
+        precondition(MessageBlock.parse("```\nunfinished") == [.code("", "unfinished")])
+        precondition(MessageBlock.parse("| A | B |\n| --- | --- |\n| 1 | 2 |") == [.table([["A", "B"], ["1", "2"]])])
+        precondition(MessageBlock.parse("ordinary | text") == [.prose("ordinary | text")])
+        print("PASS: fenced code, incomplete streaming code, tables and prose parsing")
+        precondition(InboxAdmission.allows(connected: true, enabledServer: "host", currentServer: "host", admittedServer: "host", paused: false, cancelled: false))
+        precondition(!InboxAdmission.allows(connected: false, enabledServer: "host", currentServer: "host", admittedServer: "host", paused: false, cancelled: false))
+        precondition(!InboxAdmission.allows(connected: true, enabledServer: "host", currentServer: "other", admittedServer: "host", paused: false, cancelled: false))
+        precondition(!InboxAdmission.allows(connected: true, enabledServer: "", currentServer: "host", admittedServer: "host", paused: false, cancelled: false))
+        precondition(!InboxAdmission.allows(connected: true, enabledServer: "host", currentServer: "host", admittedServer: "host", paused: true, cancelled: false))
+        precondition(!InboxAdmission.allows(connected: true, enabledServer: "host", currentServer: "host", admittedServer: "host", paused: false, cancelled: true))
+        print("PASS: inbox disconnect, server change, disabled, paused and cancellation block removal admission")
         precondition(AgentProbeResponse.isReady(Data(#"{"value":{"ready":true}}"#.utf8)))
         for value in [#"{"value":{"ready":false}}"#, #"{"ready":true}"#, #"{"value":{"ready":"true"}}"#, "invalid"] {
             precondition(!AgentProbeResponse.isReady(Data(value.utf8)))

@@ -1,5 +1,11 @@
 import Foundation
 
+enum InboxAdmission {
+    static func allows(connected: Bool, enabledServer: String, currentServer: String, admittedServer: String, paused: Bool, cancelled: Bool) -> Bool {
+        connected && !paused && !cancelled && !admittedServer.isEmpty && enabledServer == admittedServer && currentServer == admittedServer
+    }
+}
+
 enum AgentProbeResponse {
     static func isReady(_ data: Data) -> Bool {
         struct Status: Decodable {

@@ -38,7 +38,7 @@ enum HistoryCache {
             try data.write(to: file(server: server, path: path), options: [.atomic])
             #endif
             let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])
-                .filter { $0.pathExtension == "json" }
+                .filter { $0.pathExtension == "json" && $0.deletingPathExtension().lastPathComponent.count == 64 && $0.deletingPathExtension().lastPathComponent.allSatisfy(\.isHexDigit) }
                 .sorted { ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
             var bytes = 0
             for (index, file) in files.enumerated() {
@@ -50,7 +50,7 @@ enum HistoryCache {
     static func clear() throws {
         guard FileManager.default.fileExists(atPath: root.path) else { return }
         for item in try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-            where item.pathExtension == "json" && item.deletingPathExtension().lastPathComponent.count == 64 {
+            where item.pathExtension == "json" && item.deletingPathExtension().lastPathComponent.count == 64 && item.deletingPathExtension().lastPathComponent.allSatisfy(\.isHexDigit) {
             try FileManager.default.removeItem(at: item)
         }
     }

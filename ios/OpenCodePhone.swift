@@ -31,6 +31,7 @@ struct OpenCodePhoneApp: App {
                 if api.connected { SessionsView() } else { ConnectView() }
                 #endif
               }.opacity(privacy.allowsAccess ? 1 : 0).allowsHitTesting(privacy.allowsAccess)
+                  .accessibilityHidden(!privacy.allowsAccess).disabled(!privacy.allowsAccess)
               if !privacy.allowsAccess { PocketLockView() }
             }
             .environmentObject(api)
@@ -39,7 +40,7 @@ struct OpenCodePhoneApp: App {
             .environmentObject(inbox)
             .environmentObject(privacy)
             .onChange(of: phase) { _, value in if value == .background { privacy.lock() } }
-            .task(id: "\(phase)-\(privacy.allowsAccess)") {
+            .task(id: "\(phase)-\(privacy.allowsAccess)-\(api.connected)") {
                 guard phase == .active else { return }
                 await privacy.unlock()
                 guard privacy.allowsAccess else { return }
