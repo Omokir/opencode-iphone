@@ -156,6 +156,7 @@ struct Awake: Decodable { let awake: Bool }
 struct HostStatus: Decodable {
     let awake: Bool
     let battery: Battery?
+    let storage: StorageCapacity?
     struct Battery: Decodable {
         let available: Bool
         let percentage: Int?
@@ -163,6 +164,13 @@ struct HostStatus: Decodable {
         let onAC: Bool?
         let state: String?
     }
+}
+struct StorageCapacity: Decodable {
+    let totalBytes: Int64
+    let freeBytes: Int64
+    var usedPercent: Double { totalBytes > 0 ? min(100, max(0, 100 * (1 - Double(freeBytes) / Double(totalBytes)))) : 0 }
+    var freeGB: Double { Double(max(0, freeBytes)) / 1_000_000_000 }
+    var totalGB: Double { Double(max(0, totalBytes)) / 1_000_000_000 }
 }
 struct CodexQuota: Decodable {
     let available: Bool

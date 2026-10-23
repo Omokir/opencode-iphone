@@ -11,12 +11,13 @@ xcrun --sdk iphonesimulator swiftc -swift-version 5 -parse-as-library -D SNAPSHO
   ios/*.swift \
   -o "$APP/OpenCodePocket"
 cp ios/Info.plist "$APP/Info.plist"
+cp ios/PrivacyInfo.xcprivacy "$APP/PrivacyInfo.xcprivacy"
 python3 scripts/icon.py "$APP"
 DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for k,values in d["devices"].items() if "iOS" in k for v in values if "iPhone" in v["name"]))')
 xcrun simctl boot "$DEVICE"
 xcrun simctl bootstatus "$DEVICE" -b
 xcrun simctl install "$DEVICE" "$APP"
-for SCREEN in onboarding chat options models control sessions question files; do
+for SCREEN in onboarding chat options models control sessions question files inbox; do
   xcrun simctl launch "$DEVICE" com.omokir.opencodepocket "--snapshot-$SCREEN"
   sleep 3
   xcrun simctl io "$DEVICE" screenshot "build/iphone-$SCREEN.png"

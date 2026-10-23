@@ -24,6 +24,9 @@ Native SwiftUI remote client for OpenCode V2. iOS 17+; no webview, no embedded t
   are fetched even when outside the first page; desktop metadata is untouched.
 - Notebook file browser with protected roots, bounded binary download/upload,
   checksums, version-checked overwrite confirmation and upload receipts.
+- Opt-in foreground phone inbox: a Files-visible app folder uploads direct files
+  to a dedicated notebook folder, then removes matching local originals only
+  after re-reading and verifying committed remote contents. See [folder guide](docs/INBOX.md).
 - Local protected drafts (text and existing chat attachments), attachment
   thumbnails/Quick Look previews and event-driven foreground response updates.
 - Notebook battery on conversation list: percentage, charging/AC and low-battery

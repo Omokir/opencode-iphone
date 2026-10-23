@@ -41,5 +41,26 @@ import Foundation
         let preserved = try String(contentsOf: manifest, encoding: .utf8)
         precondition(preserved == "corrupt fixture")
         print("PASS: draft text/attachment recovery, uncertainty flag, isolation and clear-on-empty")
+        let inboxFile = directory.appendingPathComponent("move-fixture.txt")
+        try Data("first".utf8).write(to: inboxFile)
+        let originalHash = try InboxLocalFiles.digest(inboxFile)
+        try Data("other".utf8).write(to: inboxFile)
+        do {
+            try InboxLocalFiles.removeUnchanged(inboxFile, digest: originalHash, size: 5)
+            preconditionFailure("Same-sized modified source must remain")
+        } catch { }
+        precondition(FileManager.default.fileExists(atPath: inboxFile.path))
+        let actualHash = try InboxLocalFiles.digest(inboxFile)
+        try InboxLocalFiles.removeUnchanged(inboxFile, digest: actualHash, size: 5)
+        precondition(!FileManager.default.fileExists(atPath: inboxFile.path))
+        let link = directory.appendingPathComponent("link.txt")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: unrelated)
+        let unrelatedHash = try InboxLocalFiles.digest(unrelated)
+        do {
+            try InboxLocalFiles.removeUnchanged(link, digest: unrelatedHash, size: 16)
+            preconditionFailure("Symlink must not be removed as synced source")
+        } catch { }
+        precondition(FileManager.default.fileExists(atPath: unrelated.path))
+        print("PASS: inbox cleanup preserves changed files and links; removes only matching content")
     }
 }

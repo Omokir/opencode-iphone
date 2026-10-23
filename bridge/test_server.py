@@ -24,6 +24,7 @@ class GatewayTests(unittest.TestCase):
         self.http.phone_control = server.PhoneControl(self.state, lambda *args: server.upstream(*args))
         self.http.codex_usage = server.CodexUsage(reader=lambda: {'account': None})
         self.http.files = server.FileBrowser(self.state, roots={'home': {'name': 'Fixture', 'path': str(self.state)}})
+        self.http.inbox = server.PhoneInbox(self.state / 'inbox-state', home=self.state)
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
 
@@ -206,6 +207,22 @@ class GatewayTests(unittest.TestCase):
         self.assertIn('limit=15', result)
         for path in ['/api/session/ses_1/message?limit=50&cursor=older', '/api/session/ses_1/message?limit=5&order=desc&type=assistant', '/api/session?limit=50&order=desc']:
             self.assertEqual(server.mobile_history_path(path), path)
+
+    def test_inbox_authenticated_wire_and_actual_verification(self):
+        base = f'http://127.0.0.1:{self.http.server_port}'
+        auth = {'Authorization': 'Bearer test-token'}
+        with urllib.request.urlopen(urllib.request.Request(base + '/phone/inbox/prepare', data=b'', headers=auth)) as response:
+            self.assertEqual(json.load(response)['path'], 'Downloads/Iphone 11 Omoki')
+        identifier = str(uuid.uuid4())
+        path = 'Downloads/Iphone 11 Omoki/' + identifier + '-wire.txt'
+        payload = b'inbox wire fixture'
+        headers = dict(auth, **{'Content-Type': 'application/octet-stream', 'X-Upload-ID': identifier, 'X-Content-SHA256': hashlib.sha256(payload).hexdigest()})
+        query = urllib.parse.urlencode({'path': path, 'id': identifier})
+        with urllib.request.urlopen(urllib.request.Request(base + '/phone/inbox/upload?' + query, data=payload, headers=headers)) as response:
+            self.assertEqual(json.load(response)['size'], len(payload))
+        with urllib.request.urlopen(urllib.request.Request(base + '/phone/inbox/verify?' + query, headers=auth)) as response:
+            self.assertEqual(json.load(response)['sha256'], hashlib.sha256(payload).hexdigest())
+        self.assertEqual(self.request('/phone/inbox/verify?' + query)[0], 401)
 
     def test_sse_stream_forwards_hints_not_other_sessions_or_content(self):
         own = json.dumps({'type': 'session.message.delta', 'data': {'sessionID': 'ses_own', 'text': 'private-own-text'}})

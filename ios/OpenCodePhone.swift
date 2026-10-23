@@ -10,6 +10,8 @@ enum Style {
 
 @main
 struct OpenCodePhoneApp: App {
+    @Environment(\.scenePhase) private var phase
+    @StateObject private var inbox = InboxSync()
     @StateObject private var api = API()
     #if SNAPSHOT
     @StateObject private var unread = UnreadStore(defaults: UserDefaults(suiteName: "snapshot-" + UUID().uuidString)!)
@@ -30,6 +32,14 @@ struct OpenCodePhoneApp: App {
             .environmentObject(api)
             .environmentObject(unread)
             .environmentObject(pins)
+            .environmentObject(inbox)
+            .task(id: phase) {
+                guard phase == .active else { return }
+                while !Task.isCancelled {
+                    await inbox.sync(api)
+                    do { try await Task.sleep(for: .seconds(8)) } catch { break }
+                }
+            }
             .tint(Style.blue)
         }
     }
@@ -95,6 +105,7 @@ struct SessionsView: View {
     @State private var create = false
     @State private var phoneControl = false
     @State private var fileBrowser = false
+    @State private var inboxSettings = false
     @State private var hostStatus: HostStatus?
     @State private var hostChecked: Date?
     @State private var hostStatusFailed = false
@@ -135,6 +146,9 @@ struct SessionsView: View {
                     HostBatteryView(status: hostStatus, stale: hostStatusFailed || api.reachable == false || (hostChecked.map { Date().timeIntervalSince($0) > 15 } ?? false))
                 }
                 Section {
+                    StorageDashboard(host: hostStatus?.storage, stale: hostStatusFailed || api.reachable == false)
+                }
+                Section {
                     CodexQuotaView(quota: codexQuota, failed: quotaFailed || api.reachable == false || Date().timeIntervalSince(quotaChecked) > 120 && codexQuota != nil, loading: quotaLoading) {
                         Task { await loadQuota(refresh: true) }
                     }
@@ -145,6 +159,9 @@ struct SessionsView: View {
                             .font(.headline).padding(.vertical, 6)
                     }
                     Text("Estado da conexão, autorização temporária e botão Parar.").font(.caption).foregroundStyle(.secondary)
+                }
+                Section {
+                    Button("Pasta automática do iPhone", systemImage: "arrow.up.doc") { inboxSettings = true }
                 }
                 if !displayedPins.isEmpty {
                     Section("Fixadas") {
@@ -217,6 +234,7 @@ struct SessionsView: View {
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $phoneControl) { PhoneControlView() }
             .sheet(isPresented: $fileBrowser) { FileBrowserView() }
+            .sheet(isPresented: $inboxSettings) { InboxSyncView() }
             .alert("Nova conversa", isPresented: $create) {
                 TextField("Pasta no notebook", text: $directory).textInputAutocapitalization(.never).autocorrectionDisabled()
                 Button("Criar") { Task { await newSession() } }

@@ -82,12 +82,12 @@ extension API {
         return LocalPreview(url: destination, name: file.name)
         #endif
     }
-    func uploadFile(_ file: StagedUpload, root: String, path: String, expected: String?) async throws -> UploadReceipt {
+    func uploadFile(_ file: StagedUpload, root: String, path: String, expected: String?, inbox: Bool = false) async throws -> UploadReceipt {
         #if SNAPSHOT
         return UploadReceipt(uploadID: file.id.uuidString, root: root, path: path, size: file.size, sha256: file.sha256, version: "fixture-version")
         #else
-        var request = try makeRequest("/phone/files/upload?root=" + Self.escape(root) + "&path=" + Self.escape(path), method: "POST")
-        request.timeoutInterval = 300
+        var request = try makeRequest((inbox ? "/phone/inbox/upload?root=" : "/phone/files/upload?root=") + Self.escape(root) + "&path=" + Self.escape(path), method: "POST")
+        request.timeoutInterval = inbox ? 86400 : 300
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue(String(file.size), forHTTPHeaderField: "Content-Length")
         request.setValue(file.id.uuidString, forHTTPHeaderField: "X-Upload-ID")

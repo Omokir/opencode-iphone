@@ -4,6 +4,8 @@ import Foundation
 struct ModelsTest {
     static func main() throws {
         let decoder = JSONDecoder()
+        let capacity = StorageCapacity(totalBytes: 100_000_000_000, freeBytes: 25_000_000_000)
+        precondition(capacity.usedPercent == 75 && capacity.freeGB == 25 && capacity.totalGB == 100)
         let searchURL = URLComponents(string: SessionSearch.path(query: "  Café & plano?  ", cursor: "opaque+/=&"))!
         let searchItems = Dictionary(uniqueKeysWithValues: searchURL.queryItems!.map { ($0.name, $0.value!) })
         precondition(searchItems["search"] == "Café & plano?")

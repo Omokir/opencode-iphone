@@ -118,6 +118,11 @@ daquele aparelho; não revoga outros clientes.
 
 ## 6. Recursos opcionais e limites
 
+Na versão 0.5.0, **Pasta automática do iPhone** cria pasta específica visível no
+Arquivos e oferece mover seus arquivos para computador após verificar conteúdo.
+É opcional e começa desativada. [Leia funcionamento e remoção dos originais](INBOX.md)
+antes de ativar. Dashboard mostra armazenamento dos dois aparelhos, não RAM.
+
 Bateria depende de Linux power_supply; desktop sem bateria pode informar indisponível.
 Cota Codex depende de CLI compatível e conta autenticada, não representa saldo API.
 Modo manter acordado depende da integração local; não acorda computador já suspenso.

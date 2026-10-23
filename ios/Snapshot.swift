@@ -95,6 +95,7 @@ struct SnapshotRoot: View {
         else if arguments.contains("--snapshot-control") { PhoneControlView() }
         else if arguments.contains("--snapshot-question") { QuestionFormView(question: Snapshot.question, session: session) { } }
         else if arguments.contains("--snapshot-files") { FileBrowserView() }
+        else if arguments.contains("--snapshot-inbox") { InboxSyncView() }
         else if arguments.contains("--snapshot-options") { ChatOptionsView(session: $session) }
         else if arguments.contains("--snapshot-models") {
             let models = try! JSONDecoder().decode(Catalog.self, from: JSONSerialization.data(withJSONObject: Snapshot.catalog)).models

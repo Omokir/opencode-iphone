@@ -152,7 +152,7 @@ class FileBrowser:
                 initial = os.fstat(fd)
                 if not stat.S_ISREG(initial.st_mode):
                     raise FileError(403, 'Somente arquivos regulares podem ser baixados.')
-                if initial.st_size > self.max_bytes:
+                if self.max_bytes is not None and initial.st_size > self.max_bytes:
                     raise FileError(413, 'Limite de 64 MB por transferência.')
                 if expected and expected != version(initial):
                     raise FileError(409, 'Arquivo mudou. Atualize pasta antes de baixar.')
@@ -217,7 +217,7 @@ class FileBrowser:
         parts = self.parts(relative)
         if not parts or not expected or not re.fullmatch('[0-9a-f]{64}', digest or ''):
             raise FileError(400, 'Nome, condição e checksum do envio são obrigatórios.')
-        if length < 0 or length > self.max_bytes:
+        if length < 0 or self.max_bytes is not None and length > self.max_bytes:
             raise FileError(413, 'Limite de 64 MB por transferência.')
         receipt_file = self.receipt_path(identifier)
         identifier = receipt_file.stem

@@ -18,6 +18,8 @@ from battery import battery_status
 from codex_usage import CodexUsage
 from files import FileBrowser, FileError
 from events import session_hint
+from inbox import PhoneInbox
+from storage import storage_status
 
 STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
@@ -32,10 +34,10 @@ RULES = {
     'GET': [r'/api/info', r'/api/session', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
             r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage',
-            r'/phone/files/(roots|list|download|receipt|context)', r'/phone/session/ses[^/]+/events'],
+            r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/verify', r'/phone/session/ses[^/]+/events'],
     'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
-             r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload'],
+             r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload)'],
     'PATCH': [r'/api/session/ses[^/]+'],
 }
 
@@ -235,8 +237,8 @@ class Handler(BaseHTTPRequestHandler):
             if not self.path.startswith('/') or '%' in path or '..' in path:
                 return self.reply(400, {'error': 'Invalid path'})
             length = int(self.headers.get('Content-Length', '0'))
-            maximum = self.server.files.max_bytes if path == '/phone/files/upload' else MAX_BODY
-            if not 0 <= length <= maximum or self.headers.get('Transfer-Encoding'):
+            maximum = self.server.files.max_bytes if path in ('/phone/files/upload', '/phone/inbox/upload') else MAX_BODY
+            if length < 0 or (path != '/phone/inbox/upload' and length > maximum) or self.headers.get('Transfer-Encoding'):
                 return self.reply(413, {'error': 'Request too large'})
             self.connection.settimeout(10)
             if path == '/pair' and self.command == 'POST':
@@ -257,6 +259,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self.stream_events(stream[1])
                 finally:
                     STREAM_SLOTS.release()
+            if path.startswith('/phone/inbox/'):
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                relative = query.get('path', [''])[0]
+                if path.endswith('/prepare'):
+                    if length:
+                        return self.reply(400, {'error': 'Sem corpo nesta operação.'})
+                    return self.reply(200, self.server.inbox.prepare())
+                if path.endswith('/verify'):
+                    return self.reply(200, self.server.inbox.verify(relative, query.get('id', [''])[0]))
+                if self.headers.get('Content-Type', '').split(';')[0] != 'application/octet-stream':
+                    return self.reply(415, {'error': 'Envio binário obrigatório.'})
+                return self.reply(200, self.server.inbox.upload(relative, self.rfile, length,
+                    self.headers.get('X-Upload-ID', ''), self.headers.get('X-Content-SHA256', '')))
             if path.startswith('/phone/files/'):
                 query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                 root = query.get('root', ['home'])[0]
@@ -325,7 +340,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/phone/status':
                 active = subprocess.run(['systemctl', '--user', 'is-active', '--quiet',
                                          'opencode-phone-mode.service']).returncode == 0
-                return self.reply(200, {'awake': active, 'battery': battery_status()})
+                return self.reply(200, {'awake': active, 'battery': battery_status(), 'storage': storage_status()})
             if path == '/phone/mode':
                 value = json.loads(body or b'{}').get('awake')
                 if not isinstance(value, bool):
@@ -360,5 +375,6 @@ if __name__ == '__main__':
     server.phone_control = PhoneControl(STATE, upstream)
     server.codex_usage = CodexUsage()
     server.files = FileBrowser(STATE)
+    server.inbox = PhoneInbox(STATE)
     server.daemon_threads = True
     server.serve_forever()
