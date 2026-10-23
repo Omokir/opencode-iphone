@@ -25,6 +25,8 @@ jobs:
           build/models-test
           xcrun swiftc -parse-as-library -framework CryptoKit ios/HistoryCache.swift tests/CachePolicyTests.swift -o build/cache-test
           build/cache-test
+          xcrun swiftc -parse-as-library ios/RealtimeProtocol.swift tests/VoiceProtocolTests.swift -o build/voice-test
+          build/voice-test
       - name: Native preference persistence tests
         run: |
           xcrun swiftc -parse-as-library -framework CryptoKit ios/Models.swift ios/RemoteFiles.swift ios/PinStore.swift ios/ProjectFavorites.swift ios/DraftStore.swift ios/InboxLocalFiles.swift tests/StoreTests.swift -o build/stores-test

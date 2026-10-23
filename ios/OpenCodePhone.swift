@@ -400,6 +400,7 @@ struct SessionsView: View {
     @State private var chatQuery = ""
     @State private var showChatSearch = false
     @State private var showFullSearch = false
+    @State private var voiceCall = false
     @State private var visibleMessage: String?
     @State private var restoredPosition = false
     private let drafts = DraftStore()
@@ -624,6 +625,7 @@ struct SessionsView: View {
         chatContent
         .navigationTitle(session.title ?? "Conversa").navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { Button("Ligar por voz", systemImage: "phone") { voiceCall = true } }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Nome, modo e modelo", systemImage: "slider.horizontal.3") { options = true }
@@ -638,6 +640,7 @@ struct SessionsView: View {
         .sheet(isPresented: $options) { ChatOptionsView(session: $session) }
         .sheet(isPresented: $controlPanel) { PhoneControlView() }
         .sheet(isPresented: $showFullSearch) { FullChatSearchView(sessionID: session.id) }
+        .sheet(isPresented: $voiceCall) { VoiceCallView(session: session) }
         .sheet(isPresented: $fileBrowser) { FileBrowserView(initialDirectory: session.location.directory) }
         .sheet(item: $preview) { FilePreviewView(file: $0) }
         .sheet(item: $question) { form in
@@ -717,7 +720,7 @@ struct SessionsView: View {
         }
     }
     func markReadIfVisible(_ snapshot: Session) {
-        if phase == .active && store.error == nil && !options && !controlPanel && !fileBrowser && preview == nil && !selectingFiles && !selectingPhotos && question == nil {
+        if phase == .active && store.error == nil && !voiceCall && !options && !controlPanel && !fileBrowser && preview == nil && !selectingFiles && !selectingPhotos && question == nil {
             unread.markRead(snapshot, server: api.server)
         }
     }
@@ -860,6 +863,7 @@ struct SettingsView: View {
                     Toggle("Mostrar diagnósticos experimentais", isOn: $advanced).onChange(of: advanced) { _, value in UserDefaults.standard.set(value, forKey: "settings.advanced") }
                 }
                 Section("Manutenção") {
+                    NavigationLink("Voz · OpenAI Realtime") { VoiceSettingsView() }
                     NavigationLink("Notificações opcionais") { NotificationSettingsView() }
                     NavigationLink("Aparelhos pareados") { PairedDevicesView() }
                     NavigationLink("Diagnóstico e atualização") { MaintenanceView() }

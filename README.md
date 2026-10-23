@@ -8,6 +8,8 @@ Daily-use improvements and limits: [0.6.0 cache, queue and privacy](docs/QUALITY
 
 Projects/system integrations: [0.7.0 supported features and pending limits](docs/WORKFLOWS-0.7.md).
 
+Voice: [0.8.0 Realtime architecture, costs and physical test limits](docs/VOICE-0.8.md).
+
 ## Included
 
 - Existing sessions, new sessions in a notebook directory, paged history.
