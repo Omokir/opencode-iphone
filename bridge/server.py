@@ -18,6 +18,8 @@ from battery import battery_status
 from codex_usage import CodexUsage
 from files import FileBrowser, FileError
 from events import session_hint
+from devices import DeviceTokens
+from resume import ResumableInbox
 from inbox import PhoneInbox
 from storage import storage_status
 
@@ -33,11 +35,11 @@ STREAM_SLOTS = threading.BoundedSemaphore(8)
 RULES = {
     'GET': [r'/api/info', r'/api/session', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
-            r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage',
-            r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/verify', r'/phone/session/ses[^/]+/events'],
+            r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices',
+            r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/events'],
     'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
-             r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload)'],
+             r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke'],
     'PATCH': [r'/api/session/ses[^/]+'],
 }
 
@@ -61,7 +63,7 @@ def session_defaults(body):
     return json.dumps(payload).encode()
 
 
-def pair(code):
+def pair(code, name='iPhone'):
     with PAIR_LOCK:
         now = time.time()
         ATTEMPTS[:] = [t for t in ATTEMPTS if now - t < 60]
@@ -74,8 +76,9 @@ def pair(code):
         entry = json.loads(file.read_text())
         if entry['expires'] < now or not hmac.compare_digest(str(code), entry['code']):
             return 401, {'error': 'Código inválido ou expirado.'}
+        token = DeviceTokens(STATE).issue(name)
         file.unlink()
-        return 200, {'token': secret()}
+        return 200, {'token': token}
 
 
 def core_request(method, path, data=None):
@@ -152,7 +155,13 @@ def mobile_messages(body):
         for part in message.get('content', []):
             if isinstance(part, dict) and part.get('type') == 'tool' and isinstance(part.get('state'), dict):
                 state = part['state']
-                state.pop('content', None)  # Current mobile UI shows status, not raw tool output.
+                content = state.pop('content', None)
+                # Bounded text preview, never inline binary/tool attachment data.
+                if isinstance(content, list):
+                    text = '\n'.join(item.get('text', '')[:2048] for item in content[:8]
+                                     if isinstance(item, dict) and isinstance(item.get('text'), str))
+                    if text:
+                        state['detail'] = text[:8192] + ('\n[prévia limitada]' if len(text) > 8192 else '')
                 if state.get('status') not in ('running', 'streaming'):
                     state.pop('input', None)
     return json.dumps(value).encode()
@@ -245,9 +254,12 @@ class Handler(BaseHTTPRequestHandler):
                 if length > 1024:
                     return self.reply(413, {'error': 'Pairing request too large'})
                 body = self.rfile.read(length)
-                return self.reply(*pair(json.loads(body).get('code', '')))
+                payload = json.loads(body)
+                return self.reply(*pair(payload.get('code', ''), payload.get('name', 'iPhone')))
             auth = self.headers.get('Authorization', '')
-            if not hmac.compare_digest(auth, 'Bearer ' + secret()):
+            device_tokens = DeviceTokens(STATE)
+            current_device = device_tokens.identify(auth[7:] if auth.startswith('Bearer ') else '')
+            if current_device is None:
                 return self.reply(401, {'error': 'Pareie novamente no notebook.'})
             if not allowed(self.command, path):
                 return self.reply(403, {'error': 'Route not available to mobile client'})
@@ -262,6 +274,24 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/phone/inbox/'):
                 query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                 relative = query.get('path', [''])[0]
+                if path.endswith('/progress'):
+                    return self.reply(200, self.server.resumable.progress(relative, query.get('id', [''])[0],
+                        int(query.get('size', ['-1'])[0]), query.get('sha256', [''])[0]))
+                if path.endswith('/chunk'):
+                    if length > self.server.resumable.chunk_bytes or self.headers.get('Content-Type') != 'application/octet-stream':
+                        return self.reply(400, {'error': 'Bloco inválido.'})
+                    chunk = self.rfile.read(length)
+                    if len(chunk) != length:
+                        return self.reply(400, {'error': 'Bloco incompleto.'})
+                    return self.reply(200, self.server.resumable.append(relative, query.get('id', [''])[0],
+                        int(query.get('size', ['-1'])[0]), query.get('sha256', [''])[0],
+                        int(query.get('offset', ['-1'])[0]), chunk, self.headers.get('X-Chunk-SHA256', '')))
+                if path.endswith('/commit'):
+                    if length:
+                        return self.reply(400, {'error': 'Sem corpo nesta operação.'})
+                    self.connection.settimeout(3600)
+                    return self.reply(200, self.server.resumable.commit(relative, query.get('id', [''])[0],
+                        int(query.get('size', ['-1'])[0]), query.get('sha256', [''])[0]))
                 if path.endswith('/prepare'):
                     if length:
                         return self.reply(400, {'error': 'Sem corpo nesta operação.'})
@@ -308,6 +338,14 @@ class Handler(BaseHTTPRequestHandler):
                         self.headers.get('X-Upload-ID', ''), self.headers.get('X-Content-SHA256', ''), expected)
                     return self.reply(200, result)
             body = self.rfile.read(length) if length else None
+            if path == '/phone/devices':
+                return self.reply(200, device_tokens.listing(current_device))
+            if path == '/phone/devices/revoke':
+                payload = json.loads(body or b'{}')
+                identifier = payload.get('id')
+                if not isinstance(identifier, str) or len(identifier) > 64:
+                    return self.reply(400, {'error': 'Identificador inválido.'})
+                return self.reply(200, device_tokens.revoke(identifier))
             control = self.server.phone_control
             if path == '/phone/codex/usage':
                 query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
@@ -376,5 +414,6 @@ if __name__ == '__main__':
     server.codex_usage = CodexUsage()
     server.files = FileBrowser(STATE)
     server.inbox = PhoneInbox(STATE)
+    server.resumable = ResumableInbox(server.inbox)
     server.daemon_threads = True
     server.serve_forever()

@@ -1,6 +1,13 @@
 import Foundation
 import Security
 import Combine
+import UIKit
+
+private final class PrivateAPITransport: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) { completionHandler(nil) }
+}
 
 enum Vault {
     private static var query: [String: Any] {
@@ -39,6 +46,7 @@ final class API: ObservableObject {
     @Published var connected = false
     @Published var server: String
     @Published var reachable: Bool?
+    @Published var connectionIssue: String?
     private var token: String?
     let transport: URLSession
 
@@ -46,11 +54,12 @@ final class API: ObservableObject {
         server = UserDefaults.standard.string(forKey: "server") ?? ""
         token = Vault.read()
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 35
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 3600
         configuration.waitsForConnectivity = false
         configuration.httpShouldSetCookies = false
         configuration.urlCache = nil
-        transport = URLSession(configuration: configuration)
+        transport = URLSession(configuration: configuration, delegate: PrivateAPITransport(), delegateQueue: nil)
         connected = token != nil && !server.isEmpty
     }
 
@@ -75,13 +84,15 @@ final class API: ObservableObject {
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         let data: Data
         let response: URLResponse
+        let requestServer = server
         do {
             (data, response) = try await transport.data(for: request)
         } catch {
-            if (error as? URLError)?.code != .cancelled { reachable = false }
+            if (error as? URLError)?.code != .cancelled { reachable = false; connectionIssue = ConnectionAdvice.describe(error) }
             throw error
         }
         reachable = true
+        connectionIssue = nil
         guard let http = response as? HTTPURLResponse else { throw PhoneError.message("Resposta inválida.") }
         guard (200..<300).contains(http.statusCode) else {
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -90,7 +101,9 @@ final class API: ObservableObject {
             throw PhoneError.message(message)
         }
         let payload = data.isEmpty ? Data("{}".utf8) : data
-        return try JSONDecoder().decode(T.self, from: payload)
+        let decoded = try JSONDecoder().decode(T.self, from: payload)
+        if method == "GET", requestServer == server { HistoryCache.save(payload, server: requestServer, path: path) }
+        return decoded
         #endif
     }
 
@@ -136,7 +149,7 @@ final class API: ObservableObject {
         let previous = server
         server = address.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            let response: PairResponse = try await request("/pair", method: "POST", body: ["code": code], authenticated: false)
+            let response: PairResponse = try await request("/pair", method: "POST", body: ["code": code, "name": UIDevice.current.model], authenticated: false)
             try Vault.save(response.token)
             token = response.token
             UserDefaults.standard.set(server, forKey: "server")
@@ -151,7 +164,11 @@ final class API: ObservableObject {
         Vault.clear()
         token = nil
         connected = false
+        reachable = nil
+        connectionIssue = nil
     }
+
+    func cached<T: Decodable>(_ path: String) -> T? { HistoryCache.read(server: server, path: path) }
 
     static func escape(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""

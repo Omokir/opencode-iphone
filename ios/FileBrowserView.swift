@@ -145,6 +145,7 @@ struct FileReplacement: Identifiable {
 
 struct FileBrowserView: View {
     @EnvironmentObject var api: API
+    @EnvironmentObject var privacy: PrivacyLock
     @Environment(\.dismiss) var dismiss
     @StateObject private var store = FileBrowserStore()
     @State private var importing = false
@@ -223,7 +224,7 @@ struct FileBrowserView: View {
             }
             .sheet(item: $store.preview) { FilePreviewView(file: $0) }
             .alert("Substituir arquivo existente?", isPresented: Binding(get: { store.replacement != nil }, set: { if !$0 { store.replacement = nil } }), presenting: store.replacement) { replacement in
-                Button("Substituir", role: .destructive) { store.replace(replacement, api: api) }
+                Button("Substituir", role: .destructive) { Task { if await privacy.confirm("Substituir arquivo no computador") { store.replace(replacement, api: api) } } }
                 Button("Cancelar", role: .cancel) { store.replacement = nil; store.notice = "Substituição cancelada; destino não foi alterado." }
             } message: { replacement in Text("\(replacement.existing.name) já existe nesta pasta. Conteúdo atual será substituído; app não oferece desfazer. Se versão mudar, será necessário confirmar novamente.") }
         }

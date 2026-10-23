@@ -4,6 +4,8 @@ Native SwiftUI remote client for OpenCode V2. iOS 17+; no webview, no embedded t
 
 **Instalação e uso em português:** [tutorial completo](docs/GUIA-PT-BR.md).
 
+Daily-use improvements and limits: [0.6.0 cache, queue and privacy](docs/QUALITY-0.6.md).
+
 ## Included
 
 - Existing sessions, new sessions in a notebook directory, paged history.

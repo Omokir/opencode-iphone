@@ -17,6 +17,16 @@ final class ChatStore: ObservableObject {
     @Published var refreshed = false
     @Published var liveConnected = false
     @Published var renderRevision = 0
+    @Published var showingCache = false
+    var activity: String {
+        if showingCache { return "Histórico salvo · estado atual não confirmado" }
+        if !permissions.isEmpty { return "Aguardando permissão" }
+        if !questions.isEmpty { return "Aguardando sua resposta" }
+        guard let last = messages.last else { return "Pronto" }
+        if last.type == "user" { return "Aguardando resposta do notebook" }
+        if last.error != nil { return "Resposta com erro" }
+        return last.time.completed == nil ? "Executando" : "Finalizado"
+    }
     private var pendingID: String?
     private var pendingFingerprint: Data?
     private var metadataRevision = 0
@@ -48,6 +58,12 @@ final class ChatStore: ObservableObject {
     }
 
     func refresh(_ api: API, session: Session, olderPage: Bool = false) async {
+        if messages.isEmpty, !refreshed, !olderPage,
+           let page: Page<Message> = api.cached("/api/session/\(session.id)/message?limit=50&order=desc") {
+            applyMessages(page, ticket: 0)
+            olderCursor = page.cursor?.next
+            showingCache = true
+        }
         let currentTicket = nextTicket()
         let revision = metadataRevision
         do {
@@ -58,6 +74,7 @@ final class ChatStore: ObservableObject {
             let page: Page<Message> = try await api.request(path)
             if olderPage || !refreshed { olderCursor = page.cursor?.next }
             applyMessages(page, ticket: currentTicket, older: olderPage)
+            showingCache = false
             let requests: Page<Permission> = try await api.request("/api/session/\(session.id)/permission")
             let questionsPage: Page<QuestionForm> = try await api.request("/api/session/\(session.id)/form")
             guard currentTicket >= appliedFull else { return }
@@ -81,7 +98,7 @@ final class ChatStore: ObservableObject {
             refreshed = true
         } catch is CancellationError { }
         catch let failure as URLError where failure.code == .cancelled { }
-        catch { self.error = error.localizedDescription }
+        catch { self.error = ConnectionAdvice.describe(error) }
     }
 
     func receiveEvent(_ type: String, api: API, session: Session) {

@@ -25,6 +25,7 @@ class GatewayTests(unittest.TestCase):
         self.http.codex_usage = server.CodexUsage(reader=lambda: {'account': None})
         self.http.files = server.FileBrowser(self.state, roots={'home': {'name': 'Fixture', 'path': str(self.state)}})
         self.http.inbox = server.PhoneInbox(self.state / 'inbox-state', home=self.state)
+        self.http.resumable = server.ResumableInbox(self.http.inbox)
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
 
@@ -60,7 +61,10 @@ class GatewayTests(unittest.TestCase):
     def test_pairing_expires_is_single_use_and_rate_limited(self):
         file = self.state / 'pairing.json'
         file.write_text(json.dumps({'code': '012345', 'expires': server.time.time() + 60}))
-        self.assertEqual(self.request('/pair', body={'code': '012345'}), (200, {'token': 'test-token'}))
+        status, paired = self.request('/pair', body={'code': '012345'})
+        self.assertEqual(status, 200)
+        self.assertNotEqual(paired['token'], 'test-token')
+        self.assertIsNotNone(server.DeviceTokens(self.state).identify(paired['token']))
         self.assertEqual(self.request('/pair', body={'code': '012345'})[0], 401)
         file.write_text(json.dumps({'code': '012345', 'expires': 0}))
         self.assertEqual(self.request('/pair', body={'code': '012345'})[0], 401)
@@ -188,6 +192,33 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(response.headers['X-Content-SHA256'], receipt['sha256'])
         self.assertEqual(self.request('/phone/files/roots')[0], 401)
         self.assertFalse(server.allowed('DELETE', '/phone/files/download'))
+
+    def test_resumable_inbox_wire(self):
+        import urllib.parse
+        self.http.inbox.prepare()
+        identifier = str(uuid.uuid4())
+        payload = b'wire resumable fixture'
+        digest = hashlib.sha256(payload).hexdigest()
+        path = self.http.inbox.prefix + identifier + '-fixture.txt'
+        query = '?' + urllib.parse.urlencode({'path': path, 'id': identifier, 'size': len(payload), 'sha256': digest})
+        self.assertEqual(self.request('/phone/inbox/progress' + query, 'test-token')[1]['offset'], 0)
+        base = f'http://127.0.0.1:{self.http.server_port}'
+        headers = {'Authorization': 'Bearer test-token', 'Content-Type': 'application/octet-stream', 'X-Chunk-SHA256': digest}
+        with urllib.request.urlopen(urllib.request.Request(base + '/phone/inbox/chunk' + query + '&offset=0', data=payload, headers=headers)) as response:
+            self.assertEqual(json.load(response)['offset'], len(payload))
+        self.assertEqual(self.request('/phone/inbox/commit' + query, 'test-token', method='POST')[0], 200)
+        self.assertEqual(self.request('/phone/inbox/verify?' + urllib.parse.urlencode({'path': path, 'id': identifier}), 'test-token')[1]['sha256'], digest)
+
+    def test_device_registry_wire_revokes_only_selected_token(self):
+        registry = server.DeviceTokens(self.state)
+        token = registry.issue('Synthetic phone')
+        second = registry.issue('Second synthetic phone')
+        status, listing = self.request('/phone/devices', token)
+        self.assertEqual(status, 200)
+        current = next(d for d in listing['devices'] if d['current'])
+        self.assertEqual(self.request('/phone/devices/revoke', token, {'id': current['id']})[0], 200)
+        self.assertEqual(self.request('/phone/devices', token)[0], 401)
+        self.assertEqual(self.request('/phone/devices', second)[0], 200)
 
     def test_message_projection_omits_inline_file_data(self):
         body = b'{"data":[{"id":"msg_1","type":"user","files":[{"name":"photo.png","mime":"image/png","data":"private-base64","source":{"uri":"private"}}]}]}'

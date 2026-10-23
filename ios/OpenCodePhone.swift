@@ -13,6 +13,7 @@ struct OpenCodePhoneApp: App {
     @Environment(\.scenePhase) private var phase
     @StateObject private var inbox = InboxSync()
     @StateObject private var api = API()
+    @StateObject private var privacy = PrivacyLock()
     #if SNAPSHOT
     @StateObject private var unread = UnreadStore(defaults: UserDefaults(suiteName: "snapshot-" + UUID().uuidString)!)
     @StateObject private var pins = PinStore(defaults: UserDefaults(suiteName: "pins-snapshot-" + UUID().uuidString)!)
@@ -22,21 +23,28 @@ struct OpenCodePhoneApp: App {
     #endif
     var body: some Scene {
         WindowGroup {
-            Group {
+            ZStack {
+              Group {
                 #if SNAPSHOT
                 SnapshotRoot()
                 #else
                 if api.connected { SessionsView() } else { ConnectView() }
                 #endif
+              }.opacity(privacy.allowsAccess ? 1 : 0).allowsHitTesting(privacy.allowsAccess)
+              if !privacy.allowsAccess { PocketLockView() }
             }
             .environmentObject(api)
             .environmentObject(unread)
             .environmentObject(pins)
             .environmentObject(inbox)
-            .task(id: phase) {
+            .environmentObject(privacy)
+            .onChange(of: phase) { _, value in if value == .background { privacy.lock() } }
+            .task(id: "\(phase)-\(privacy.allowsAccess)") {
                 guard phase == .active else { return }
+                await privacy.unlock()
+                guard privacy.allowsAccess else { return }
                 while !Task.isCancelled {
-                    await inbox.sync(api)
+                    if privacy.allowsAccess { await inbox.sync(api) }
                     do { try await Task.sleep(for: .seconds(8)) } catch { break }
                 }
             }
@@ -124,44 +132,41 @@ struct SessionsView: View {
     @State private var searchBusy = false
     @State private var searchError: String?
     @State private var searchTicket = UUID()
+    @State private var dashboardExpanded = false
+    @State private var listFilter = "Todas"
+    @State private var cachedList = false
     var searching: Bool { !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    var displayedSessions: [Session] { searching ? searchResults : sessions }
-    var displayedPins: [String] { searching ? pinnedIDs.filter { id in searchResults.contains { $0.id == id } } : pinnedIDs }
+    var displayedSessions: [Session] {
+        (searching ? searchResults : sessions).filter { session in
+            switch listFilter {
+            case "Não lidas": return unread.isUnread(session, server: api.server)
+            case "Em execução": return session.outcome == nil && session.time?.idle == nil
+            default: return true
+            }
+        }
+    }
+    var displayedPins: [String] { searching || listFilter != "Todas" ? pinnedIDs.filter { id in displayedSessions.contains { $0.id == id } } : pinnedIDs }
     var pinnedIDs: [String] { pins.ids(server: api.server) }
     var otherSessions: [Session] { displayedSessions.filter { !pins.contains($0.id, server: api.server) } }
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                Section {
-                    HStack(spacing: 12) {
-                        Image(systemName: "laptopcomputer").font(.title).foregroundStyle(Style.blue)
-                        VStack(alignment: .leading) {
-                            Text("OpenCode Pocket").font(.system(.title3, design: .rounded, weight: .bold))
-                            Text("Conversas do notebook").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }.padding(.vertical, 10)
-                }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 Section {
-                    HostBatteryView(status: hostStatus, stale: hostStatusFailed || api.reachable == false || (hostChecked.map { Date().timeIntervalSince($0) > 15 } ?? false))
-                }
-                Section {
-                    StorageDashboard(host: hostStatus?.storage, stale: hostStatusFailed || api.reachable == false)
-                }
-                Section {
-                    CodexQuotaView(quota: codexQuota, failed: quotaFailed || api.reachable == false || Date().timeIntervalSince(quotaChecked) > 120 && codexQuota != nil, loading: quotaLoading) {
-                        Task { await loadQuota(refresh: true) }
+                    DisclosureGroup(isExpanded: $dashboardExpanded) {
+                        HostBatteryView(status: hostStatus, stale: hostStatusFailed || api.reachable == false)
+                        StorageDashboard(host: hostStatus?.storage, stale: hostStatusFailed || api.reachable == false)
+                        CodexQuotaView(quota: codexQuota, failed: quotaFailed, loading: quotaLoading) { Task { await loadQuota(refresh: true) } }
+                    } label: {
+                        Label(api.reachable == false ? "Notebook indisponível" : "Notebook · indicadores", systemImage: "laptopcomputer")
+                            .font(.subheadline.weight(.semibold))
                     }
-                }
-                Section {
-                    Button { phoneControl = true } label: {
-                        Label("Controlar meu iPhone", systemImage: "iphone.gen3.radiowaves.left.and.right")
-                            .font(.headline).padding(.vertical, 6)
-                    }
-                    Text("Estado da conexão, autorização temporária e botão Parar.").font(.caption).foregroundStyle(.secondary)
-                }
-                Section {
-                    Button("Pasta automática do iPhone", systemImage: "arrow.up.doc") { inboxSettings = true }
+                    if cachedList { Label("Histórico salvo · atualizando…", systemImage: "internaldrive").font(.caption).foregroundStyle(.secondary) }
+                    Picker("Filtrar conversas", selection: $listFilter) {
+                        Text("Todas").tag("Todas")
+                        Text("Não lidas").tag("Não lidas")
+                        Text("Em execução").tag("Em execução")
+                    }.pickerStyle(.segmented)
                 }
                 if !displayedPins.isEmpty {
                     Section("Fixadas") {
@@ -214,12 +219,21 @@ struct SessionsView: View {
                         Button("Ajustes", systemImage: "slider.horizontal.3") { settings = true }
                         Button("Arquivos do notebook", systemImage: "folder") { fileBrowser = true }
                         Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
+                        Menu {
+                            Button("Pasta automática do iPhone", systemImage: "arrow.up.doc") { inboxSettings = true }
+                            Button("Controlar meu iPhone (USB)", systemImage: "cable.connector") { phoneControl = true }
+                        } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Recursos do Pocket")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) { Button("Nova conversa", systemImage: "square.and.pencil") { create = true } }
             }
             .overlay { if busy && sessions.isEmpty { ProgressView() } }
             .refreshable { await load(resetPagination: true) }
+            .onAppear {
+                if sessions.isEmpty, let page: Page<Session> = api.cached("/api/session?limit=30&archived=false&parentID=null&order=desc") {
+                    sessions = page.data; cursor = page.cursor?.next; cachedList = true
+                }
+            }
             .task(id: phase) {
                 guard phase == .active else { return }
                 while !Task.isCancelled {
@@ -311,12 +325,13 @@ struct SessionsView: View {
             }
             if more || !loadedMore { cursor = page.cursor?.next }
             error = nil
+            cachedList = false
             do {
                 hostStatus = try await api.request("/phone/status")
                 hostChecked = Date()
                 hostStatusFailed = false
             } catch { hostStatusFailed = true }
-        } catch { self.error = "Não foi possível acessar notebook: \(error.localizedDescription)" }
+        } catch { self.error = ConnectionAdvice.describe(error) }
     }
     func newSession() async {
         guard directory.hasPrefix("/") else { error = "Use pasta com caminho absoluto, começando por /."; return }
@@ -372,6 +387,10 @@ struct SessionsView: View {
     @State private var draftSavedAt: Date?
     @State private var draftError: String?
     @State private var draftSaveTask: Task<Void, Never>?
+    @State private var chatQuery = ""
+    @State private var showChatSearch = false
+    @State private var visibleMessage: String?
+    @State private var restoredPosition = false
     private let drafts = DraftStore()
     init(session: Session) {
         _session = State(initialValue: session)
@@ -385,6 +404,10 @@ struct SessionsView: View {
             controlHeader
             modeHeader
             connectionStrip
+            Text(store.activity).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
+            if showChatSearch {
+                TextField("Buscar nas mensagens carregadas", text: $chatQuery).textFieldStyle(.roundedBorder).padding(.horizontal)
+            }
             messageTimeline
             notices
             questionCards
@@ -430,7 +453,7 @@ struct SessionsView: View {
     }
     private var connectionStrip: some View {
             HStack {
-                Label(store.liveConnected ? "Ao vivo" : "Consulta periódica", systemImage: store.liveConnected ? "dot.radiowaves.left.and.right" : "arrow.clockwise")
+                Label(store.showingCache ? "Histórico salvo" : store.liveConnected ? "Ao vivo" : "Consulta periódica", systemImage: store.showingCache ? "internaldrive" : store.liveConnected ? "dot.radiowaves.left.and.right" : "arrow.clockwise")
                     .foregroundStyle(store.liveConnected ? Color.green : .secondary)
                 Spacer()
                 if draftError != nil { Text("Rascunho não salvo").foregroundStyle(.red) }
@@ -451,14 +474,20 @@ struct SessionsView: View {
                                 }
                             }.disabled(store.loadingOlder)
                         }
-                        ForEach(store.messages) { message in MessageView(message: message).id(message.id) }
+                        ForEach(store.messages.filter { message in
+                            chatQuery.isEmpty || ([message.text ?? ""] + (message.content ?? []).compactMap(\.text)).joined(separator: "\n").localizedCaseInsensitiveContains(chatQuery)
+                        }) { message in MessageView(message: message).id(message.id) }
                         if store.messages.isEmpty && store.refreshed {
                             ContentUnavailableView("Converse com notebook", systemImage: "text.bubble", description: Text("Envie tarefa para começar."))
                         }
                         Color.clear.frame(height: 1).id("bottom").background(GeometryReader { geometry in
                             Color.clear.preference(key: ChatBottomPreference.self, value: geometry.frame(in: .named("chat-scroll")).maxY)
                         })
-                    }.padding()
+                    }.scrollTargetLayout().padding()
+                }
+                .scrollPosition(id: $visibleMessage, anchor: .top)
+                .onChange(of: visibleMessage) { _, value in
+                    if restoredPosition && scrollInteracting && chatQuery.isEmpty, let value { UserDefaults.standard.set(value, forKey: "chat.position." + HistoryCache.key(api.server + "|" + session.id)) }
                 }
                 .coordinateSpace(name: "chat-scroll")
                 .background(GeometryReader { geometry in Color.clear.preference(key: ChatHeightPreference.self, value: geometry.size.height) })
@@ -470,11 +499,20 @@ struct SessionsView: View {
                     if !scrollInteracting && value <= viewportHeight + 80 { following = true }
                 }
                 .onChange(of: store.renderRevision) { _, _ in
+                    if !restoredPosition, !store.messages.isEmpty {
+                        restoredPosition = true
+                        if let saved = UserDefaults.standard.string(forKey: "chat.position." + HistoryCache.key(api.server + "|" + session.id)), store.messages.contains(where: { $0.id == saved }) {
+                            following = false; proxy.scrollTo(saved, anchor: .top); return
+                        }
+                    }
                     if following && !scrollInteracting && !store.loadingOlder { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if !following {
-                        Button("Últimas mensagens", systemImage: "arrow.down") { following = true; proxy.scrollTo("bottom", anchor: .bottom) }
+                        Button("Últimas mensagens", systemImage: "arrow.down") {
+                            following = true; proxy.scrollTo("bottom", anchor: .bottom)
+                            UserDefaults.standard.removeObject(forKey: "chat.position." + HistoryCache.key(api.server + "|" + session.id))
+                        }
                             .font(.caption.weight(.semibold)).buttonStyle(.borderedProminent).padding(10)
                     }
                 }
@@ -541,6 +579,7 @@ struct SessionsView: View {
     private var composer: some View {
             HStack(alignment: .bottom, spacing: 12) {
                 Menu {
+                    Button("Buscar nesta conversa", systemImage: "magnifyingglass") { showChatSearch.toggle(); if !showChatSearch { chatQuery = "" } }
                     Button("Arquivos", systemImage: "folder") { selectingFiles = true }
                     Button("Fotos", systemImage: "photo") { selectingPhotos = true }
                 } label: {
@@ -737,7 +776,7 @@ struct MessageView: View {
                 Spacer()
                 if message.type == "assistant" && message.time.completed == nil { ProgressView().controlSize(.mini).accessibilityLabel("Em execução") }
             }
-            if let text = message.text { Text(text).textSelection(.enabled) }
+            if let text = message.text { MarkdownMessage(text: text) }
             if let failure = message.error {
                 Label(failure.message ?? "Modelo não conseguiu responder. Confira conta e modelo nos ajustes do chat.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.red).textSelection(.enabled)
@@ -748,19 +787,24 @@ struct MessageView: View {
             }
             ForEach(Array((message.content ?? []).enumerated()), id: \.offset) { _, part in
                 if part.type == "text", let text = part.text {
-                    Text(.init(text)).textSelection(.enabled)
+                    MarkdownMessage(text: text)
                 } else if part.type == "tool" {
-                    HStack(alignment: .top) {
+                    DisclosureGroup {
+                        if let input = part.state?.input { Text(input.pretty).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                        if let detail = part.state?.detail { Text(detail).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                        if part.state?.input == nil && part.state?.detail == nil { Text("Detalhes não disponíveis nesta página. Confira notebook.").font(.caption) }
+                    } label: { HStack(alignment: .top) {
                         Image(systemName: part.state?.status == "error" ? "exclamationmark.circle" : "terminal")
                         Text(part.name ?? "Ferramenta").font(.system(.caption, design: .monospaced))
                         Spacer()
                         Text(status(part.state?.status)).font(.caption2)
-                    }.foregroundStyle(.secondary).padding(10).background(Style.paper, in: RoundedRectangle(cornerRadius: 8))
+                    } }.foregroundStyle(.secondary).padding(10).background(Style.paper, in: RoundedRectangle(cornerRadius: 8))
                 }
             }
         }
         .padding(16).frame(maxWidth: .infinity, alignment: .leading)
         .background(message.type == "user" ? Style.blue.opacity(0.07) : Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .contextMenu { Button("Copiar mensagem", systemImage: "doc.on.doc") { UIPasteboard.general.string = ([message.text ?? ""] + (message.content ?? []).compactMap(\.text)).joined(separator: "\n") } }
     }
     func status(_ value: String?) -> String {
         switch value { case "completed": return "Concluída"; case "error": return "Erro"; default: return "Executando" }
@@ -774,6 +818,8 @@ struct SettingsView: View {
     @State private var loaded = false
     @State private var busy = false
     @State private var error: String?
+    @EnvironmentObject var privacy: PrivacyLock
+    @State private var advanced = UserDefaults.standard.bool(forKey: "settings.advanced")
     var body: some View {
         NavigationStack {
             Form {
@@ -790,9 +836,19 @@ struct SettingsView: View {
                     LabeledContent("Versão", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
+                Section("Privacidade") {
+                    Toggle("Face ID ou código ao abrir", isOn: Binding(get: { privacy.enabled }, set: { value in Task { await privacy.setEnabled(value) } }))
+                    Text("Bloqueia acesso ao voltar do segundo plano. Também confirma operações sensíveis. Não impede captura de tela pelo sistema.").font(.caption)
+                    Button("Limpar histórico offline") { do { try HistoryCache.clear() } catch { self.error = "Não foi possível limpar cache." } }
+                    Toggle("Mostrar diagnósticos experimentais", isOn: $advanced).onChange(of: advanced) { _, value in UserDefaults.standard.set(value, forKey: "settings.advanced") }
+                }
+                Section("Manutenção") {
+                    NavigationLink("Aparelhos pareados") { PairedDevicesView() }
+                    NavigationLink("Diagnóstico e atualização") { MaintenanceView() }
+                }
                 Button("Desconectar este iPhone", role: .destructive) { api.disconnect(); dismiss() }
             }
-            .navigationTitle("Conexão")
+            .navigationTitle("Ajustes")
             .toolbar { Button("Concluir") { dismiss() } }
             .task {
                 do { let status: Awake = try await api.request("/phone/status"); awake = status.awake; loaded = true }

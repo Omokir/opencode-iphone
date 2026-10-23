@@ -7,6 +7,15 @@ import CryptoKit
     @Published var status = "Desativado"
     @Published var busy = false
     @Published var lastError: String?
+    @Published var paused = false
+    @Published var completedBytes: Int64 = 0
+    @Published var totalBytes: Int64 = 0
+    @Published var bytesPerSecond: Double = 0
+    @Published var queue: [String] = []
+    @Published var activeName: String?
+    @Published var activePhase = "Aguardando"
+    @Published var history: [InboxRecord] = InboxRecord.load()
+    @Published var removeAfterTransfer = UserDefaults.standard.object(forKey: "inbox.removeAfterTransfer") == nil ? !(UserDefaults.standard.string(forKey: "inbox.enabledServer") ?? "").isEmpty : UserDefaults.standard.bool(forKey: "inbox.removeAfterTransfer")
     static let folderName = "Iphone 11 Omoki"
 
     static func folder() throws -> URL {
@@ -19,36 +28,59 @@ import CryptoKit
         enabledServer = value ? server : ""
         UserDefaults.standard.set(enabledServer, forKey: "inbox.enabledServer")
         status = value ? "Aguardando arquivos…" : "Desativado; arquivos locais preservados"
+        paused = false
+    }
+    func setRemoval(_ value: Bool) {
+        removeAfterTransfer = value
+        UserDefaults.standard.set(value, forKey: "inbox.removeAfterTransfer")
+    }
+    func record(_ name: String, path: String, server: String, removed: Bool) {
+        history.insert(InboxRecord(id: UUID(), name: name, path: path, serverKey: HistoryCache.key(server), date: Date(), removed: removed), at: 0)
+        history = Array(history.prefix(100)); InboxRecord.save(history)
     }
     func sync(_ api: API) async {
-        guard !busy, api.connected, enabledServer == api.server else { return }
+        guard !busy, !paused, api.connected, enabledServer == api.server else { return }
         let server = api.server
         busy = true
         defer { busy = false }
         do {
             let folder = try Self.folder()
             let entries = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles])
+                .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            queue = entries.map(\.lastPathComponent)
             guard !entries.isEmpty else { status = "Pasta vazia. Salve arquivos nela pelo app Arquivos."; lastError = nil; return }
             let _: BrowserLocation = try await api.request("/phone/inbox/prepare", method: "POST")
             for source in entries {
                 try Task.checkCancellation()
-                guard enabledServer == server, api.server == server else { return }
+                guard enabledServer == server, api.server == server, !paused else { return }
                 let info = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
                 guard info.isRegularFile == true, info.isSymbolicLink != true else { continue }
+                activeName = source.lastPathComponent; activePhase = "Verificando"
                 status = "Verificando \(source.lastPathComponent)…"
                 let staged = try await Task.detached(priority: .utility) { try InboxLocalFiles.inspect(source) }.value
                 let keyData = Data((server + "|" + source.lastPathComponent + "|" + staged.sha256).utf8)
                 let key = "inbox.job." + SHA256.hash(data: keyData).map { String(format: "%02x", $0) }.joined()
+                if UserDefaults.standard.bool(forKey: key + ".copied") { queue.removeAll { $0 == source.lastPathComponent }; continue }
                 let identifier: UUID
                 if let saved = UserDefaults.standard.string(forKey: key), let id = UUID(uuidString: saved) { identifier = id }
                 else { identifier = UUID(); UserDefaults.standard.set(identifier.uuidString, forKey: key) }
                 let path = "Downloads/" + Self.folderName + "/" + identifier.uuidString.lowercased() + "-" + staged.name
                 let file = StagedUpload(id: identifier, url: staged.url, name: staged.name, size: staged.size, sha256: staged.sha256)
-                guard enabledServer == server, api.server == server else { return }
+                guard enabledServer == server, api.server == server, !paused else { return }
+                totalBytes = file.size; completedBytes = 0; bytesPerSecond = 0
                 if try await verification(api, path: path, id: identifier) == nil {
                     status = "Enviando \(staged.name)…"
-                    let _: UploadReceipt = try await api.uploadFile(file, root: "home", path: path, expected: nil, inbox: true)
+                    activePhase = "Enviando"
+                    let started = Date()
+                    var resumedAt: Int64?
+                    try await api.uploadResumable(file, path: path, permitted: { !self.paused && self.enabledServer == server && api.server == server }, progress: { bytes in
+                        if resumedAt == nil { resumedAt = bytes }
+                        self.completedBytes = bytes
+                        self.bytesPerSecond = Double(bytes - (resumedAt ?? 0)) / max(0.1, Date().timeIntervalSince(started))
+                    })
                 }
+                status = "Verificando conteúdo gravado: \(staged.name)…"
+                activePhase = "Verificando"
                 // A receipt alone is insufficient: re-read actual committed bytes.
                 guard enabledServer == server, api.server == server,
                       let verified = try await verification(api, path: path, id: identifier),
@@ -57,14 +89,24 @@ import CryptoKit
                       verified.sha256 == file.sha256, verified.size == file.size else {
                     throw TransferFailure.message("Conteúdo no computador não confirmado. Original preservado.")
                 }
-                guard enabledServer == server, api.server == server, !Task.isCancelled else { return }
-                try await Task.detached(priority: .utility) { try InboxLocalFiles.removeUnchanged(source, digest: file.sha256, size: file.size) }.value
-                UserDefaults.standard.removeObject(forKey: key)
-                status = "Transferido e verificado: \(file.name). Original local removido."
+                guard enabledServer == server, api.server == server, !paused, !Task.isCancelled else { return }
+                if removeAfterTransfer {
+                    try await Task.detached(priority: .utility) { try InboxLocalFiles.removeUnchanged(source, digest: file.sha256, size: file.size) }.value
+                    UserDefaults.standard.removeObject(forKey: key)
+                    status = "Transferido e verificado: \(file.name). Original local removido."
+                    record(file.name, path: path, server: server, removed: true)
+                } else {
+                    UserDefaults.standard.set(true, forKey: key + ".copied")
+                    status = "Cópia verificada: \(file.name). Original mantido no iPhone."
+                    record(file.name, path: path, server: server, removed: false)
+                }
+                completedBytes = totalBytes
+                queue.removeAll { $0 == source.lastPathComponent }
+                activeName = nil; activePhase = "Concluído"
                 lastError = nil
             }
         } catch is CancellationError { status = "Pausado; arquivos pendentes preservados" }
-        catch { lastError = error.localizedDescription; status = "Pendente — original preservado" }
+        catch { lastError = ConnectionAdvice.describe(error); status = "Pendente — original preservado"; activePhase = "Falhou"; paused = true }
     }
     private func verification(_ api: API, path: String, id: UUID) async throws -> UploadReceipt? {
         var request = try api.makeRequest("/phone/inbox/verify?path=" + API.escape(path) + "&id=" + id.uuidString)
@@ -81,29 +123,62 @@ struct InboxSyncView: View {
     @EnvironmentObject var api: API
     @EnvironmentObject var inbox: InboxSync
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var privacy: PrivacyLock
+    @State private var confirmRemoval = false
     var body: some View {
         NavigationStack {
             Form {
                 Section("Pasta no iPhone") {
                     Text(InboxSync.folderName).font(.headline)
                     Text("Arquivos → No Meu iPhone → OpenCode Pocket → Iphone 11 Omoki. Salve imagens, documentos e outros arquivos diretamente nessa pasta.")
-                    Text("Sem limite fixo por arquivo; depende do espaço livre e conexão. Subpastas e links não são enviados.").font(.caption)
+                    Text("Envio retomável até 1 TiB por arquivo; depende do espaço livre e conexão. Subpastas e links não são enviados.").font(.caption)
                 }
                 Section("Mover para computador") {
-                    Toggle("Ativar envio e remoção após verificar", isOn: Binding(get: { inbox.enabledServer == api.server }, set: { inbox.setEnabled($0, server: api.server) }))
+                    Toggle("Ativar transferência automática", isOn: Binding(get: { inbox.enabledServer == api.server }, set: { value in
+                        Task { if await privacy.confirm("Autorizar transferência da pasta do iPhone") { inbox.setEnabled(value, server: api.server) } }
+                    }))
+                    Toggle("Remover original após verificar", isOn: Binding(get: { inbox.removeAfterTransfer }, set: { value in
+                        if value { confirmRemoval = true } else { inbox.setRemoval(false) }
+                    })).disabled(inbox.busy)
+                    Text(inbox.removeAfterTransfer ? "Modo mover: remove original somente após verificar bytes gravados." : "Modo copiar: mantém original no iPhone; conteúdo alterado será nova transferência.").font(.caption).foregroundStyle(.secondary)
                     Text("Destino: ~/Downloads/Iphone 11 Omoki. Nomes recebem identificador único; nada é sobrescrito. Após verificar bytes gravados no computador, original é apagado desta pasta do iPhone. Não há desfazer no app.").font(.caption)
                     Text("Funciona com Pocket aberto e computador conectado. iOS pode suspender ao sair; arquivos pendentes ficam no iPhone. Desativar impede próximas remoções, mas não desfaz transferências já concluídas.").font(.caption)
                 }
                 Section("Estado") {
                     Text(inbox.status)
                     if inbox.busy { ProgressView() }
+                    if inbox.totalBytes > 0 {
+                        ProgressView(value: Double(inbox.completedBytes), total: Double(inbox.totalBytes))
+                        Text("\(ByteCountFormatter.string(fromByteCount: inbox.completedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: inbox.totalBytes, countStyle: .file)) · \(ByteCountFormatter.string(fromByteCount: Int64(inbox.bytesPerSecond), countStyle: .file))/s").font(.caption.monospacedDigit())
+                    }
+                    Button(inbox.paused ? "Retomar fila" : "Pausar fila") { inbox.paused.toggle() }
                     if let error = inbox.lastError { Text(error).foregroundStyle(.red) }
                     Button("Sincronizar agora") { Task { await inbox.sync(api) } }.disabled(inbox.busy || inbox.enabledServer != api.server)
+                }
+                Section("Fila") {
+                    ForEach(inbox.queue, id: \.self) { name in
+                        HStack { Text(name).font(.caption); Spacer(); Text(inbox.activeName == name ? (inbox.paused ? "Pausado" : inbox.activePhase) : "Aguardando").font(.caption2).foregroundStyle(.secondary) }
+                    }
+                    if inbox.queue.isEmpty { Text("Sem arquivos pendentes na última consulta.").foregroundStyle(.secondary) }
+                }
+                Section("Transferências verificadas") {
+                    ForEach(inbox.history.filter { $0.serverKey == HistoryCache.key(api.server) }) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.name).font(.subheadline.weight(.semibold))
+                            Text(item.removed ? "Verificado · original removido" : "Verificado · original mantido").font(.caption)
+                            Text(item.path).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+                            Text(item.date, style: .date).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .navigationTitle("Pasta automática").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
             .task { do { _ = try InboxSync.folder() } catch { inbox.lastError = error.localizedDescription } }
+            .alert("Remover originais após transferência?", isPresented: $confirmRemoval) {
+                Button("Ativar remoção", role: .destructive) { Task { if await privacy.confirm("Ativar remoção após transferência verificada") { inbox.setRemoval(true) } } }
+                Button("Cancelar", role: .cancel) { }
+            } message: { Text("Arquivos novos dessa pasta serão removidos do iPhone após verificação. Não há desfazer. Cópias anteriores mantidas não serão apagadas automaticamente.") }
         }
     }
 }

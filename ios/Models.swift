@@ -79,7 +79,7 @@ struct Message: Decodable, Identifiable {
         let text: String?
         let name: String?
         let state: State?
-        struct State: Decodable { let status: String; let input: JSONValue? }
+        struct State: Decodable { let status: String; let input: JSONValue?; let detail: String? }
     }
     var visible: Bool { type == "user" || type == "assistant" }
 }

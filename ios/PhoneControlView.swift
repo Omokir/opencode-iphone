@@ -16,6 +16,8 @@ struct PhoneControlView: View {
     @State private var probing = false
     @State private var probeResult: String?
     @State private var probeTask: Task<Void, Never>?
+    @EnvironmentObject var privacy: PrivacyLock
+    @AppStorage("settings.advanced") private var advanced = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -58,7 +60,7 @@ struct PhoneControlView: View {
                 } footer: {
                     Text("Parar bloqueia novas chamadas pelo MCP e solicita interrupção da conversa. Não desfaz ações já realizadas. Se perder conexão com notebook, parada não pode ser confirmada: bloqueie iPhone ou desconecte cabo.")
                 }
-                Section("Sem cabo — diagnóstico experimental") {
+                if advanced { Section("Sem cabo — diagnóstico experimental") {
                     Text("Teste somente de conexão ao agente neste iPhone. Não lê tela, não toca em apps e não libera automação.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button(probing ? "Verificando agente local…" : "Testar agente neste iPhone") {
@@ -74,7 +76,7 @@ struct PhoneControlView: View {
                     if let probeResult { Text(probeResult).font(.caption).textSelection(.enabled) }
                     Text("Controle distante ainda não habilitado. Este teste verifica pré-requisito da futura ponte; nenhum endereço externo ou token é enviado ao agente.")
                         .font(.caption).foregroundStyle(.secondary)
-                }
+                } }
                 Section("Antes de começar") {
                     Label("Mantenha cabo conectado e iPhone desbloqueado. Bloqueio de tela não é detectado com certeza nesta versão.", systemImage: "cable.connector")
                     Label("Cada ação de toque, digitação ou abertura de app pede aprovação nesta conversa. Leia descrição antes de permitir.", systemImage: "hand.raised")
@@ -124,6 +126,7 @@ struct PhoneControlView: View {
         catch { self.fetchError = "Estado não atualizado: \(error.localizedDescription). Verifique VPN e notebook." }
     }
     func start() async {
+        guard await privacy.confirm("Autorizar controle do iPhone") else { return }
         busy = true
         defer { busy = false }
         do {
