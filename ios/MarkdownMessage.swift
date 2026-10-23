@@ -19,14 +19,15 @@ struct MarkdownMessage: View {
                 case .table(let rows):
                     ScrollView(.horizontal) {
                         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
-                            ForEach(Array(rows.enumerated()), id: \.offset) { index, cells in
-                                GridRow { ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+                            ForEach(Array(rows.prefix(200).enumerated()), id: \.offset) { index, cells in
+                                GridRow { ForEach(Array(cells.prefix(12).enumerated()), id: \.offset) { _, cell in
                                     Text(.init(cell)).font(index == 0 ? .subheadline.weight(.semibold) : .subheadline).textSelection(.enabled).frame(maxWidth: 260, alignment: .leading)
                                 } }
-                                if index == 0 { Divider().gridCellColumns(rows.first?.count ?? 1) }
+                                if index == 0 { Divider().gridCellColumns(min(12, rows.first?.count ?? 1)) }
                             }
                         }.padding(10)
                     }.background(Style.paper, in: RoundedRectangle(cornerRadius: 10))
+                    if rows.count > 200 || rows.contains(where: { $0.count > 12 }) { Text("Prévia limitada a 200 linhas e 12 colunas. Copiar mensagem preserva texto completo.").font(.caption).foregroundStyle(.secondary) }
                 }
             }
         }

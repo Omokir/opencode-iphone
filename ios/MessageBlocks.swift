@@ -20,8 +20,9 @@ enum MessageBlock: Equatable {
                 result.append(.code(language, code.joined(separator: "\n")))
                 if i < lines.count { i += 1 }
             } else if i + 1 < lines.count, lines[i].contains("|"), lines[i+1].contains("|"),
+                      !cells(lines[i]).isEmpty,
                       cells(lines[i+1]).count == cells(lines[i]).count,
-                      cells(lines[i+1]).allSatisfy({ $0.replacingOccurrences(of: ":", with: "").count >= 3 && $0.allSatisfy { $0 == "-" || $0 == ":" || $0 == " " } }) {
+                      cells(lines[i+1]).allSatisfy({ $0.filter { $0 == "-" }.count >= 3 && $0.allSatisfy { $0 == "-" || $0 == ":" || $0 == " " } }) {
                 flush(); var rows = [cells(lines[i])]; i += 2
                 while i < lines.count && lines[i].contains("|") { rows.append(cells(lines[i])); i += 1 }
                 result.append(.table(rows))

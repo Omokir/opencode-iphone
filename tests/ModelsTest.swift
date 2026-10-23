@@ -8,6 +8,7 @@ struct ModelsTest {
         precondition(MessageBlock.parse("```\nunfinished") == [.code("", "unfinished")])
         precondition(MessageBlock.parse("| A | B |\n| --- | --- |\n| 1 | 2 |") == [.table([["A", "B"], ["1", "2"]])])
         precondition(MessageBlock.parse("ordinary | text") == [.prose("ordinary | text")])
+        precondition(MessageBlock.parse("|\n|") == [.prose("|\n|")])
         print("PASS: fenced code, incomplete streaming code, tables and prose parsing")
         precondition(InboxAdmission.allows(connected: true, enabledServer: "host", currentServer: "host", admittedServer: "host", paused: false, cancelled: false))
         precondition(!InboxAdmission.allows(connected: false, enabledServer: "host", currentServer: "host", admittedServer: "host", paused: false, cancelled: false))
