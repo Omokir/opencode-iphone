@@ -27,15 +27,13 @@ struct OpenCodePhoneApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-              Group {
+              if privacy.allowsAccess {
                 #if SNAPSHOT
                 SnapshotRoot()
                 #else
                 if api.connected { SessionsView() } else { ConnectView() }
                 #endif
-              }.opacity(privacy.allowsAccess ? 1 : 0).allowsHitTesting(privacy.allowsAccess)
-                  .accessibilityHidden(!privacy.allowsAccess).disabled(!privacy.allowsAccess)
-              if !privacy.allowsAccess { PocketLockView() }
+              } else { PocketLockView() }
             }
             .environmentObject(api)
             .environmentObject(unread)
@@ -228,7 +226,7 @@ struct SessionsView: View {
                         Button("Arquivos do notebook", systemImage: "folder") { fileBrowser = true }
                         Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
                         Menu {
-                            Button("Projetos favoritos", systemImage: "star.folder") { projectPicker = true }
+                            Button("Projetos favoritos", systemImage: "star") { projectPicker = true }
                             Button("Pasta automática do iPhone", systemImage: "arrow.up.doc") { inboxSettings = true }
                             Button("Controlar meu iPhone (USB)", systemImage: "cable.connector") { phoneControl = true }
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Recursos do Pocket")

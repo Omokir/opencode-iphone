@@ -52,7 +52,7 @@ final class BackgroundInbox: NSObject, ObservableObject, URLSessionDataDelegate,
             DispatchQueue.main.async {
                 let active = Set(tasks.compactMap { $0.taskDescription })
                 let enabledServer = UserDefaults.standard.string(forKey: "inbox.enabledServer") ?? ""
-                let authorized = UserDefaults.standard.bool(forKey: "inbox.background") && !enabledServer.isEmpty
+                let authorized = UserDefaults.standard.bool(forKey: "inbox.background") && !UserDefaults.standard.bool(forKey: "inbox.paused") && !enabledServer.isEmpty
                     && UserDefaults.standard.string(forKey: "server") == enabledServer && Vault.read() != nil
                 for task in tasks {
                     if !authorized || task.state == .suspended || !self.jobs.contains(where: { $0.id.uuidString.lowercased() == task.taskDescription && $0.taskID == task.taskIdentifier && $0.serverKey == HistoryCache.key(enabledServer) }) { task.cancel() }
@@ -80,8 +80,13 @@ final class BackgroundInbox: NSObject, ObservableObject, URLSessionDataDelegate,
         guard api.connected, api.server == server, permitted() else { throw CancellationError() }
         try save()
         let staged = Self.stageURL(file.id)
-        if FileManager.default.fileExists(atPath: staged.path) { try FileManager.default.removeItem(at: staged) }
-        try FileManager.default.copyItem(at: copy.url, to: staged)
+        if FileManager.default.fileExists(atPath: staged.path) {
+            let storedSize = try staged.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? -1
+            guard Int64(storedSize) == file.size,
+                  try PrivateTransferFiles.digest(staged) == file.sha256 else {
+                throw TransferFailure.message("Cópia de segundo plano conflitante. Preservada para revisão; original não alterado.")
+            }
+        } else { try FileManager.default.copyItem(at: copy.url, to: staged) }
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: staged.path)
         var request = try api.makeRequest("/phone/inbox/upload?path=" + API.escape(path), method: "POST")
         request.timeoutInterval = 3600

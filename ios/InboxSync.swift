@@ -7,7 +7,9 @@ import CryptoKit
     @Published var status = "Desativado"
     @Published var busy = false
     @Published var lastError: String?
-    @Published var paused = false
+    @Published var paused = UserDefaults.standard.bool(forKey: "inbox.paused") {
+        didSet { UserDefaults.standard.set(paused, forKey: "inbox.paused") }
+    }
     @Published var completedBytes: Int64 = 0
     @Published var totalBytes: Int64 = 0
     @Published var bytesPerSecond: Double = 0

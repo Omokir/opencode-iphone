@@ -80,11 +80,15 @@ check must pass before the user's move policy may remove local original.
 
 Pause/cancel requests cancellation and pauses new admissions; already received
 bytes/commits may finish. Disabling background pauses queue; explicitly resume
-to continue in foreground. Disconnect cancels system tasks. On reassociation,
+to continue in foreground. Pause persists across app relaunch. Disconnect cancels system tasks. On reassociation,
 unknown, unapproved/server-mismatched or suspended orphan tasks are cancelled.
 Records and staging cannot be cleared while corresponding OS task is active.
 Uncertain outcomes preserve original; server non-clobber/checksum/receipt behavior
 prevents overwriting a conflicting destination on OS retries.
+
+App lock removes protected view hierarchy (including its modal panels) while
+locked rather than merely hiding root pixels. Opening a file while locked queues
+its URL for confirmation after authentication; it does not import automatically.
 
 ## Verification boundary
 
