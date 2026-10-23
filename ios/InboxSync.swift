@@ -14,6 +14,7 @@ import CryptoKit
     @Published var queue: [String] = []
     @Published var activeName: String?
     @Published var activePhase = "Aguardando"
+    @Published var backgroundEnabled = UserDefaults.standard.bool(forKey: "inbox.background")
     @Published var history: [InboxRecord] = InboxRecord.load()
     @Published var removeAfterTransfer = UserDefaults.standard.object(forKey: "inbox.removeAfterTransfer") == nil ? !(UserDefaults.standard.string(forKey: "inbox.enabledServer") ?? "").isEmpty : UserDefaults.standard.bool(forKey: "inbox.removeAfterTransfer")
     static let folderName = "Iphone 11 Omoki"
@@ -29,6 +30,12 @@ import CryptoKit
         UserDefaults.standard.set(enabledServer, forKey: "inbox.enabledServer")
         status = value ? "Aguardando arquivos…" : "Desativado; arquivos locais preservados"
         paused = false
+        if !value { BackgroundInbox.shared.cancelAll() }
+    }
+    func setBackground(_ value: Bool) {
+        backgroundEnabled = value
+        UserDefaults.standard.set(value, forKey: "inbox.background")
+        if !value { paused = true; BackgroundInbox.shared.cancelAll() }
     }
     func setRemoval(_ value: Bool) {
         removeAfterTransfer = value
@@ -44,6 +51,11 @@ import CryptoKit
     }
     func sync(_ api: API) async {
         guard !busy, !paused, api.connected, enabledServer == api.server else { return }
+        if let job = BackgroundInbox.shared.active(server: api.server) {
+            status = "Transferência entregue ao iOS: \(job.name). Original preservado até verificação em primeiro plano."
+            activeName = job.name; activePhase = "Segundo plano"; totalBytes = job.size; completedBytes = job.sent
+            return
+        }
         let server = api.server
         busy = true
         defer { busy = false }
@@ -73,6 +85,11 @@ import CryptoKit
                 guard mayContinue(api, server: server) else { return }
                 totalBytes = file.size; completedBytes = 0; bytesPerSecond = 0
                 if try await verification(api, path: path, id: identifier) == nil {
+                    if backgroundEnabled, file.size <= PrivateTransferFiles.maxBytes {
+                        try await BackgroundInbox.shared.enqueue(api, file: file, path: path, permitted: { self.backgroundEnabled && self.mayContinue(api, server: server) })
+                        status = "Envio agendado no iOS. Verificação e remoção somente ao reabrir Pocket."
+                        return
+                    }
                     status = "Enviando \(staged.name)…"
                     activePhase = "Enviando"
                     let started = Date()
@@ -129,6 +146,7 @@ struct InboxSyncView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var privacy: PrivacyLock
     @State private var confirmRemoval = false
+    @ObservedObject private var background = BackgroundInbox.shared
     var body: some View {
         NavigationStack {
             Form {
@@ -149,13 +167,16 @@ struct InboxSyncView: View {
                     Text("Funciona com Pocket aberto e computador conectado. iOS pode suspender ao sair; arquivos pendentes ficam no iPhone. Desativar impede próximas remoções, mas não desfaz transferências já concluídas.").font(.caption)
                 }
                 Section("Estado") {
+                    Toggle("Continuar envio iniciado em segundo plano", isOn: Binding(get: { inbox.backgroundEnabled }, set: { value in Task { if await privacy.confirm("Alterar transferência em segundo plano") { inbox.setBackground(value) } } }))
+                    Text("Opcional: arquivos até 64 MiB usam cópia imutável privada, acessível ao sistema após primeiro desbloqueio. Exige espaço extra no iPhone. Originais só podem ser apagados após voltar ao Pocket e verificar computador. Maiores continuam por blocos com app aberto. Não monitora pasta continuamente fora do app.").font(.caption)
+                    Text("iOS decide quando executar. Encerrar app pelo seletor cancela transferências. Tailscale precisa continuar conectado. Desativar solicita cancelamento, mas não desfaz gravação já recebida.").font(.caption).foregroundStyle(.secondary)
                     Text(inbox.status)
                     if inbox.busy { ProgressView() }
                     if inbox.totalBytes > 0 {
                         ProgressView(value: Double(inbox.completedBytes), total: Double(inbox.totalBytes))
                         Text("\(ByteCountFormatter.string(fromByteCount: inbox.completedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: inbox.totalBytes, countStyle: .file)) · \(ByteCountFormatter.string(fromByteCount: Int64(inbox.bytesPerSecond), countStyle: .file))/s").font(.caption.monospacedDigit())
                     }
-                    Button(inbox.paused ? "Retomar fila" : "Pausar fila") { inbox.paused.toggle() }
+                    Button(inbox.paused ? "Retomar fila" : "Pausar fila") { inbox.paused.toggle(); if inbox.paused { background.cancelAll() } }
                     if let error = inbox.lastError { Text(error).foregroundStyle(.red) }
                     Button("Sincronizar agora") { Task { await inbox.sync(api) } }.disabled(inbox.busy || inbox.enabledServer != api.server)
                 }
@@ -164,6 +185,17 @@ struct InboxSyncView: View {
                         HStack { Text(name).font(.caption); Spacer(); Text(inbox.activeName == name ? (inbox.paused ? "Pausado" : inbox.activePhase) : "Aguardando").font(.caption2).foregroundStyle(.secondary) }
                     }
                     if inbox.queue.isEmpty { Text("Sem arquivos pendentes na última consulta.").foregroundStyle(.secondary) }
+                }
+                Section("Envios entregues ao iOS") {
+                    ForEach(background.jobs.filter { $0.serverKey == HistoryCache.key(api.server) }) { job in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(job.name).font(.caption.weight(.semibold))
+                            Text(backgroundLabel(job.state)).font(.caption2).foregroundStyle(.secondary)
+                            if job.size > 0 { ProgressView(value: Double(job.sent), total: Double(job.size)) }
+                        }
+                    }
+                    Button("Cancelar envios de segundo plano", role: .destructive) { inbox.paused = true; background.cancelAll() }
+                    Button("Limpar registros encerrados") { Task { await background.clearFinished() } }
                 }
                 Section("Transferências verificadas") {
                     ForEach(inbox.history.filter { $0.serverKey == HistoryCache.key(api.server) }) { item in
@@ -183,6 +215,15 @@ struct InboxSyncView: View {
                 Button("Ativar remoção", role: .destructive) { Task { if await privacy.confirm("Ativar remoção após transferência verificada") { inbox.setRemoval(true) } } }
                 Button("Cancelar", role: .cancel) { }
             } message: { Text("Arquivos novos dessa pasta serão removidos do iPhone após verificação. Não há desfazer. Cópias anteriores mantidas não serão apagadas automaticamente.") }
+        }
+    }
+    private func backgroundLabel(_ state: String) -> String {
+        switch state {
+        case "queued": return "Agendado pelo iOS"
+        case "sending": return "Enviando pelo iOS"
+        case "uploaded": return "Recebido · verificação final pendente no Pocket"
+        case "cancelled": return "Cancelamento solicitado · confira destino"
+        default: return "Resultado incerto · original preservado; consulte destino ao retomar"
         }
     }
 }

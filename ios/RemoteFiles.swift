@@ -30,6 +30,9 @@ struct UploadReceipt: Decodable {
     let size: Int64
     let sha256: String
     let version: String
+    func matches(id: UUID, path expectedPath: String, size expectedSize: Int64, sha256 expectedDigest: String) -> Bool {
+        UUID(uuidString: uploadID) == id && root == "home" && path == expectedPath && size == expectedSize && sha256 == expectedDigest
+    }
 }
 struct TransferIssue: Decodable { let error: String; let existing: RemoteFile? }
 enum TransferFailure: LocalizedError {

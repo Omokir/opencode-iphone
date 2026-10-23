@@ -19,6 +19,7 @@ from codex_usage import CodexUsage
 from files import FileBrowser, FileError
 from events import session_hint
 from devices import DeviceTokens
+from chat_search import search_page
 from resume import ResumableInbox
 from inbox import PhoneInbox
 from storage import storage_status
@@ -32,11 +33,12 @@ ENDPOINT_LOCK = threading.Lock()
 CORE_ENDPOINT = None
 CORE_CHECKED_AT = 0
 STREAM_SLOTS = threading.BoundedSemaphore(8)
+SEARCH_SLOTS = threading.BoundedSemaphore(2)
 RULES = {
     'GET': [r'/api/info', r'/api/session', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
             r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices',
-            r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/events'],
+            r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)'],
     'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
              r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke'],
@@ -263,6 +265,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(401, {'error': 'Pareie novamente no notebook.'})
             if not allowed(self.command, path):
                 return self.reply(403, {'error': 'Route not available to mobile client'})
+            search = re.fullmatch(r'/phone/session/(ses[^/]+)/search', path)
+            if search:
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                text = query.get('q', [''])[0].strip()
+                if not 1 <= len(text) <= 200:
+                    return self.reply(400, {'error': 'Busca deve ter entre 1 e 200 caracteres.'})
+                if not SEARCH_SLOTS.acquire(blocking=False):
+                    return self.reply(429, {'error': 'Outra busca está em andamento. Tente novamente.'})
+                try:
+                    params = {'limit': '15'}
+                    cursor = query.get('cursor', [''])[0]
+                    if cursor:
+                        if len(cursor) > 8192:
+                            return self.reply(400, {'error': 'Cursor inválido.'})
+                        params['cursor'] = cursor
+                    else:
+                        params['order'] = 'desc'
+                    code, raw = upstream('GET', '/api/session/' + search[1] + '/message?' + urllib.parse.urlencode(params), None)
+                    if code != 200:
+                        return self.reply(code, raw)
+                    return self.reply(200, search_page(json.loads(raw), text))
+                finally:
+                    SEARCH_SLOTS.release()
             stream = re.fullmatch(r'/phone/session/(ses[^/]+)/events', path)
             if stream:
                 if not STREAM_SLOTS.acquire(blocking=False):

@@ -80,6 +80,9 @@ final class ChatStore: ObservableObject {
             guard currentTicket >= appliedFull else { return }
             appliedFull = currentTicket
             permissions = requests.data
+            for permission in requests.data {
+                PocketNotifications.shared.post(key: "permission|\(api.server)|\(session.id)|\(permission.id)", title: "Permissão aguardando revisão", body: "Abra Pocket e leia pedido antes de autorizar.")
+            }
             questions = questionsPage.data
             permissionDetails = permissionDetails.filter { key, _ in requests.data.contains { $0.id == key } }
             for request in requests.data {

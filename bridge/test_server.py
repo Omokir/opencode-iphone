@@ -220,6 +220,16 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(self.request('/phone/devices', token)[0], 401)
         self.assertEqual(self.request('/phone/devices', second)[0], 200)
 
+    def test_history_search_wire_preserves_upstream_pagination(self):
+        page = {'data': [{'id': 'msg_old', 'type': 'assistant', 'content': [{'type': 'text', 'text': 'An old matching result'}], 'time': {'created': 1}}], 'cursor': {'next': 'next+/='}}
+        with patch.object(server, 'upstream', return_value=(200, json.dumps(page).encode())) as upstream:
+            status, result = self.request('/phone/session/ses_test/search?q=matching&cursor=opaque%2B%2F%3D', 'test-token')
+            self.assertEqual(status, 200)
+            self.assertEqual(result['matches'][0]['id'], 'msg_old')
+            self.assertEqual(result['cursor'], 'next+/=')
+            upstream.assert_called_once_with('GET', '/api/session/ses_test/message?limit=15&cursor=opaque%2B%2F%3D', None)
+        self.assertEqual(self.request('/phone/session/ses_test/search?q=', 'test-token')[0], 400)
+
     def test_message_projection_omits_inline_file_data(self):
         body = b'{"data":[{"id":"msg_1","type":"user","files":[{"name":"photo.png","mime":"image/png","data":"private-base64","source":{"uri":"private"}}]}]}'
         projected = json.loads(server.mobile_messages(body))

@@ -161,6 +161,7 @@ final class API: ObservableObject {
     }
 
     func disconnect() {
+        BackgroundInbox.shared.cancelAll()
         Vault.clear()
         token = nil
         connected = false

@@ -10,10 +10,13 @@ enum Style {
 
 @main
 struct OpenCodePhoneApp: App {
+    @UIApplicationDelegateAdaptor(PocketAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var phase
     @StateObject private var inbox = InboxSync()
     @StateObject private var api = API()
     @StateObject private var privacy = PrivacyLock()
+    @StateObject private var projects = ProjectFavorites()
+    @StateObject private var receiver = DocumentReceiver.shared
     #if SNAPSHOT
     @StateObject private var unread = UnreadStore(defaults: UserDefaults(suiteName: "snapshot-" + UUID().uuidString)!)
     @StateObject private var pins = PinStore(defaults: UserDefaults(suiteName: "pins-snapshot-" + UUID().uuidString)!)
@@ -39,6 +42,9 @@ struct OpenCodePhoneApp: App {
             .environmentObject(pins)
             .environmentObject(inbox)
             .environmentObject(privacy)
+            .environmentObject(projects)
+            .onOpenURL { url in receiver.offer(url) }
+            .sheet(item: Binding(get: { privacy.allowsAccess ? receiver.incoming : nil }, set: { if $0 == nil && privacy.allowsAccess { receiver.close() } })) { item in DocumentImportView(item: item) }
             .onChange(of: phase) { _, value in if value == .background { privacy.lock() } }
             .task(id: "\(phase)-\(privacy.allowsAccess)-\(api.connected)") {
                 guard phase == .active else { return }
@@ -115,6 +121,7 @@ struct SessionsView: View {
     @State private var phoneControl = false
     @State private var fileBrowser = false
     @State private var inboxSettings = false
+    @State private var projectPicker = false
     @State private var hostStatus: HostStatus?
     @State private var hostChecked: Date?
     @State private var hostStatusFailed = false
@@ -221,6 +228,7 @@ struct SessionsView: View {
                         Button("Arquivos do notebook", systemImage: "folder") { fileBrowser = true }
                         Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
                         Menu {
+                            Button("Projetos favoritos", systemImage: "star.folder") { projectPicker = true }
                             Button("Pasta automática do iPhone", systemImage: "arrow.up.doc") { inboxSettings = true }
                             Button("Controlar meu iPhone (USB)", systemImage: "cable.connector") { phoneControl = true }
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Recursos do Pocket")
@@ -247,6 +255,7 @@ struct SessionsView: View {
             }
             .onChange(of: path.count) { _, count in if count == 0 { Task { await load() } } }
             .sheet(isPresented: $settings) { SettingsView() }
+            .sheet(isPresented: $projectPicker) { ProjectsView { session in sessions.insert(session, at: 0); path.append(session) } }
             .sheet(isPresented: $phoneControl) { PhoneControlView() }
             .sheet(isPresented: $fileBrowser) { FileBrowserView() }
             .sheet(isPresented: $inboxSettings) { InboxSyncView() }
@@ -292,6 +301,7 @@ struct SessionsView: View {
             if more, let cursor { url += "&cursor=" + API.escape(cursor) } else { url += "&order=desc" }
             let page: Page<Session> = try await api.request(url)
             unread.initialize(server: api.server, sessions: page.data)
+            PocketNotifications.shared.observe(page.data, server: api.server)
             if more {
                 sessions += page.data.filter { s in !sessions.contains(where: { $0.id == s.id }) }
                 loadedMore = true
@@ -358,6 +368,7 @@ struct SessionsView: View {
 @MainActor struct ChatView: View {
     @EnvironmentObject var api: API
     @EnvironmentObject var unread: UnreadStore
+    @EnvironmentObject var projects: ProjectFavorites
     @Environment(\.scenePhase) var phase
     @State private var session: Session
     @StateObject private var store = ChatStore()
@@ -390,6 +401,7 @@ struct SessionsView: View {
     @State private var draftSaveTask: Task<Void, Never>?
     @State private var chatQuery = ""
     @State private var showChatSearch = false
+    @State private var showFullSearch = false
     @State private var visibleMessage: String?
     @State private var restoredPosition = false
     private let drafts = DraftStore()
@@ -580,6 +592,11 @@ struct SessionsView: View {
     private var composer: some View {
             HStack(alignment: .bottom, spacing: 12) {
                 Menu {
+                    Button("Buscar no histórico completo", systemImage: "text.magnifyingglass") { showFullSearch = true }
+                    Button("Favoritar projeto", systemImage: "star") {
+                        do { try projects.add(server: api.server, name: URL(fileURLWithPath: session.location.directory).lastPathComponent.isEmpty ? "Projeto" : URL(fileURLWithPath: session.location.directory).lastPathComponent, directory: session.location.directory) }
+                        catch { store.sendError = error.localizedDescription }
+                    }
                     Button("Buscar nesta conversa", systemImage: "magnifyingglass") { showChatSearch.toggle(); if !showChatSearch { chatQuery = "" } }
                     Button("Arquivos", systemImage: "folder") { selectingFiles = true }
                     Button("Fotos", systemImage: "photo") { selectingPhotos = true }
@@ -622,6 +639,7 @@ struct SessionsView: View {
         navigationContent
         .sheet(isPresented: $options) { ChatOptionsView(session: $session) }
         .sheet(isPresented: $controlPanel) { PhoneControlView() }
+        .sheet(isPresented: $showFullSearch) { FullChatSearchView(sessionID: session.id) }
         .sheet(isPresented: $fileBrowser) { FileBrowserView(initialDirectory: session.location.directory) }
         .sheet(item: $preview) { FilePreviewView(file: $0) }
         .sheet(item: $question) { form in
@@ -844,6 +862,7 @@ struct SettingsView: View {
                     Toggle("Mostrar diagnósticos experimentais", isOn: $advanced).onChange(of: advanced) { _, value in UserDefaults.standard.set(value, forKey: "settings.advanced") }
                 }
                 Section("Manutenção") {
+                    NavigationLink("Notificações opcionais") { NotificationSettingsView() }
                     NavigationLink("Aparelhos pareados") { PairedDevicesView() }
                     NavigationLink("Diagnóstico e atualização") { MaintenanceView() }
                 }
