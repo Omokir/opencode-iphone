@@ -16,6 +16,9 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
     @Published var error: String?
     @Published private(set) var pending: VoiceToolCall?
     @Published private(set) var caption = ""
+    @Published private(set) var diagnosticsText = "Nenhum teste de voz realizado."
+    private var diagnostics = VoiceDiagnostics()
+    private var responseAudioPackets = 0
     private var generation = UUID()
     private var transport: URLSession?
     private var socket: URLSessionWebSocketTask?
@@ -40,6 +43,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
         let token = UUID(); generation = token
         connecting = true; muted = false; error = nil; caption = ""; status = "Solicitando microfone…"
         boundServer = api.server; toolIDs = []; ignoredResponses = []
+        diagnostics = VoiceDiagnostics(); responseAudioPackets = 0; diagnosticsText = diagnostics.text
         do {
             guard let key = VoiceKey.read() else { throw PhoneError.message("Configure chave OpenAI em Ajustes → Voz.") }
             let allowed = await withCheckedContinuation { continuation in AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) } }
@@ -84,7 +88,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
                         guard raw.count <= 512 * 1024, let event = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else { throw PhoneError.message("Evento Realtime inválido.") }
                         try await self.handle(event, configuration: configuration, api: api, session: session, monitor: monitor, token: token)
                     }
-                } catch { if self.generation == token && self.open { self.fail("Conexão de voz interrompida. Nada será reenviado automaticamente.") } }
+                } catch { if self.generation == token && self.open { self.fail(error is PhoneError ? error.localizedDescription : "Conexão ou circuito de voz interrompido. Consulte diagnóstico; nada será reenviado automaticamente.") } }
             }
             deadline = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(15 * 60)) } catch { return }
@@ -94,6 +98,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
             followTask = Task { [weak self] in
                 while !Task.isCancelled {
                     guard let self, self.generation == token, self.open else { return }
+                    self.refreshDiagnostics()
                     if self.followNeeded && self.active && !self.responding && !self.speaking && self.audio?.hasPendingAudio != true {
                         self.followNeeded = false; self.responding = true
                         do { try await self.emit(["type": "response.create"], token: token) }
@@ -131,26 +136,46 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
                         guard let self, self.generation == token, self.active else { return }
                         if self.muted || !io.current(epoch) { continue }
                         try await self.emit(["type": "input_audio_buffer.append", "audio": data.base64EncodedString()], token: token)
+                        if self.generation == token { self.diagnostics.sentPackets += 1 }
                     }
                 } catch { if self?.generation == token { self?.fail("Envio do microfone interrompido.") } }
             }
             followNeeded = true
         case "input_audio_buffer.speech_started":
+            diagnostics.speechStarts += 1
             speaking = true; status = "Ouvindo você…"
             if let pending { self.pending = nil; try await toolResult(pending.id, result: ["status": "cancelled", "message": "Nova fala antes de confirmação visual; proposta não enviada."], token: token) }
             try await interrupt(token: token)
         case "input_audio_buffer.speech_stopped": speaking = false; status = "Respondendo…"
         case "response.created":
+            responseAudioPackets = 0
             responding = true; responseID = (event["response"] as? [String: Any])?["id"] as? String
         case "response.output_audio.delta":
-            guard let response = event["response_id"] as? String, !ignoredResponses.contains(response),
+            diagnostics.receivedAudio += 1
+            guard let response = event["response_id"] as? String else { diagnostics.malformedAudio += 1; return }
+            if ignoredResponses.contains(response) { diagnostics.ignoredAudio += 1; return }
+            guard
                   let item = event["item_id"] as? String, let text = event["delta"] as? String,
-                  let data = Data(base64Encoded: text) else { return }
-            try audio?.enqueue(data, item: item)
+                  let data = Data(base64Encoded: text), !data.isEmpty, let audio else { diagnostics.malformedAudio += 1; return }
+            responseAudioPackets += 1
+            try audio.enqueue(data, item: item)
+            diagnostics.scheduledAudio += 1
         case "response.output_audio_transcript.delta":
+            diagnostics.transcripts += 1
             if let id = event["response_id"] as? String, ignoredResponses.contains(id) { return }
             if let text = event["delta"] as? String { caption = String((caption + text).suffix(4000)) }
         case "response.done":
+            let report = VoiceResponseReport(event: event)
+            diagnostics.response = report.state; diagnostics.reason = report.reason; diagnostics.code = report.code
+            refreshDiagnostics()
+            if report.state == "failed" {
+                fail("API finalizou resposta com erro (\(report.code)). Consulte diagnóstico; chave não será reenviada automaticamente.")
+                return
+            }
+            if report.state == "incomplete", report.reason == "max_output_tokens", responseAudioPackets == 0 {
+                fail("Resposta atingiu limite de tokens sem entregar áudio. Chamada encerrada para evitar tentativas pagas repetidas. Diagnóstico preservado.")
+                return
+            }
             let completed = (event["response"] as? [String: Any])?["id"] as? String
             if completed == responseID { responding = false }
             guard completed.map({ !ignoredResponses.contains($0) }) ?? true else { return }
@@ -171,6 +196,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
             }
         case "error":
             let code = (event["error"] as? [String: Any])?["code"] as? String
+            diagnostics.code = VoiceResponseReport.safeCode(code)
             if ["response_cancel_not_active", "conversation_already_has_active_response"].contains(code ?? "") { return }
             fail("Realtime recusou operação. Confira chave, modelo, limites e conexão; sessão encerrada sem repetir ferramentas.")
         default: break
@@ -244,7 +270,11 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
         for (item, milliseconds) in cuts { try await emit(["type": "conversation.item.truncate", "item_id": item, "content_index": 0, "audio_end_ms": milliseconds], token: token) }
     }
     private func fail(_ message: String) { end(); error = message }
+    private func refreshDiagnostics() {
+        diagnosticsText = diagnostics.text + (audio.map { "\n" + $0.diagnostics } ?? "")
+    }
     func end(reason: String = "Chamada encerrada. Tarefas no notebook não foram canceladas.") {
+        refreshDiagnostics()
         generation = UUID(); active = false; connecting = false
         receiveTask?.cancel(); inputTask?.cancel(); followTask?.cancel(); deadline?.cancel(); jobTask?.cancel()
         receiveTask = nil; inputTask = nil; followTask = nil; deadline = nil; jobTask = nil

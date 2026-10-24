@@ -52,6 +52,7 @@ struct VoiceCallView: View {
     let session: Session
     @StateObject private var voice = RealtimeVoiceStore()
     @StateObject private var monitor = ChatStore()
+    @StateObject private var soundTest = VoiceSoundTest()
     @State private var consent = false
     @State private var interruptTask = false
     @State private var question: QuestionForm?
@@ -67,7 +68,10 @@ struct VoiceCallView: View {
                         Button("Parar somente fala", systemImage: "speaker.slash") { voice.stopSpeaking() }.disabled(!voice.active)
                         Button("Encerrar chamada", role: .destructive) { voice.end() }
                     } else {
-                        Button("Ligar", systemImage: "phone.fill") { consent = true }
+                        Button("Ligar", systemImage: "phone.fill") { consent = true }.disabled(soundTest.running)
+                        Button(soundTest.running ? "Testando circuito local…" : "Testar som local (sem API)", systemImage: "speaker.wave.2") { Task { await soundTest.run() } }.disabled(soundTest.running)
+                        Text("Teste emite tom curto e usa microfone apenas para configurar o mesmo circuito da chamada. Nada é enviado à rede. Aumente volume pelos botões do iPhone se necessário.").font(.caption).foregroundStyle(.secondary)
+                        if !soundTest.result.isEmpty { Text(soundTest.result).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
                         NavigationLink("Configurar voz e chave API") { VoiceSettingsView() }
                     }
                     if let error = voice.error { Text(error).font(.caption).foregroundStyle(.red) }
@@ -93,10 +97,16 @@ struct VoiceCallView: View {
                     Button("Interromper tarefa no notebook", role: .destructive) { interruptTask = true }.disabled(!api.connected)
                     Text("Falar por cima e Encerrar param voz, não tarefa já admitida. Consulte conversa antes de repetir envio incerto.").font(.caption).foregroundStyle(.secondary)
                 }
+                Section {
+                    DisclosureGroup("Diagnóstico sem chave ou conteúdo") {
+                        Text(voice.diagnosticsText).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        ShareLink(item: voice.diagnosticsText) { Label("Compartilhar contadores", systemImage: "square.and.arrow.up") }
+                    }
+                }
             }.navigationTitle("Conversa por voz").navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button("Fechar") { voice.end(); dismiss() } }
-                .onDisappear { voice.end() }
-                .onChange(of: phase) { _, value in if value == .background { voice.end() } }
+                .onDisappear { voice.end(); soundTest.stop() }
+                .onChange(of: phase) { _, value in if value == .background { voice.end(); soundTest.stop() } }
                 .onChange(of: api.connected) { _, connected in if !connected { voice.end() } }
                 .onChange(of: api.server) { _, _ in voice.end() }
                 .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { _ in if voice.open { voice.end(reason: "Áudio interrompido pelo iOS; toque Ligar para retomar manualmente.") } }
@@ -108,7 +118,7 @@ struct VoiceCallView: View {
                 }
                 .sheet(item: $question) { form in QuestionFormView(question: form, session: session) { Task { await monitor.refresh(api, session: session) } } }
                 .confirmationDialog("Iniciar chamada com API paga?", isPresented: $consent, titleVisibility: .visible) {
-                    Button("Ligar usando minha chave API") { Task { if await privacy.confirm("Iniciar conversa de voz com OpenAI Realtime") { await voice.start(api, session: session, monitor: monitor) } } }
+                    Button("Ligar usando minha chave API") { Task { if await privacy.confirm("Iniciar conversa de voz com OpenAI Realtime"), !soundTest.running { await voice.start(api, session: session, monitor: monitor) } } }
                     Button("Cancelar", role: .cancel) { }
                 } message: { Text("Microfone será transmitido à OpenAI. Texto recente desta conversa pode ser compartilhado com Realtime por ferramenta. Cobrança separada; limite de 15 minutos, sem garantia de valor máximo. Não diga senhas/códigos. Nenhuma tarefa será enviada sem confirmação visual.") }
                 .alert("Interromper tarefa no notebook?", isPresented: $interruptTask) {

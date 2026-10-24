@@ -97,3 +97,25 @@ References reviewed:
 - https://developers.openai.com/api/docs/guides/realtime-conversations
 - https://developers.openai.com/api/reference/resources/realtime/subresources/client_secrets/methods/create
 - https://developer.apple.com/documentation/avfaudio
+
+## 0.8.1 — diagnosing connected-but-silent calls
+
+User observed connection and one transcript, but no audible output. That does not
+establish whether API stopped generating, VAD repeatedly interrupted, PCM events
+were rejected, or local playback/volume/route failed. No successful audio call is
+claimed from that observation.
+
+Add explicit no-API local tone using same voice-processing input/player chain;
+microphone bytes discarded locally. Counts and route types (never device names)
+show input callbacks, conversion errors, PCM sent/received/scheduled, confirmed
+playback frames, VAD starts, discarded late audio and transcript events. Diagnostics
+stay in memory and contain no token, IDs, server URL, audio, transcript or raw
+provider errors. Sharing is explicit. Session failure/incomplete token-budget
+outcomes are no longer silently ignored; a token-limit response without audio
+ends call to avoid repeatedly spending with no output. No token budget increase,
+model fallback or paid reproduction is performed automatically.
+
+Device acceptance must answer: audible local tone? system output type/volume?
+received audio count? scheduled vs confirmed playback? repeated VAD starts?
+known response status/reason? This instrumentation is not yet proof of a fix to
+the user's particular acoustic failure.

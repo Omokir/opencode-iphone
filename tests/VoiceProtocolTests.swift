@@ -23,6 +23,12 @@ import Foundation
         precondition(decoded.count == samples.count && decoded[0] == -1 && decoded[2] == 0 && decoded[3] > 0.99 && decoded[5] == 0 && decoded[6] == 0)
         precondition(RealtimePCM.decode(Data([1])) == nil)
         precondition(RealtimePCM.decode(Data(repeating: 0, count: 256 * 1024 + 2)) == nil)
+        let report = VoiceResponseReport(event: ["response": ["status": "incomplete", "status_details": ["reason": "max_output_tokens", "error": ["message": "must-not-leak", "code": "private-key-placeholder"]]]])
+        precondition(report.state == "incomplete" && report.reason == "max_output_tokens" && report.code == "other")
+        let unsafe = VoiceResponseReport(event: ["response": ["status": "must-not-leak", "status_details": ["reason": "must-not-leak"]]])
+        precondition(unsafe.state == "unknown" && unsafe.reason == "none")
+        precondition(VoiceResponseReport.safeCode("insufficient_quota") == "insufficient_quota")
+        print("PASS: voice response diagnostics preserve known failure reasons without raw error/message/key disclosure")
         print("PASS: Realtime ignores cancelled/incomplete tool calls, rejects arbitrary tools/paths, preserves PCM16 bounds/endian and clips unsafe samples")
     }
 }

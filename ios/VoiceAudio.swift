@@ -13,9 +13,18 @@ final class VoiceAudio: @unchecked Sendable {
     private var outputGeneration = 0
     private var scheduled: Int64 = 0
     private var played: Int64 = 0
+    private var playedLifetime: Int64 = 0
     private var spans: [(id: String, start: Int64, end: Int64)] = []
+    private var microphoneCallbacks = 0
+    private var conversionErrors = 0
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)!
     var hasPendingAudio: Bool { scheduled > played }
+    var diagnostics: String {
+        lock.lock(); let callbacks = microphoneCallbacks; let failures = conversionErrors; lock.unlock()
+        let session = AVAudioSession.sharedInstance()
+        let types = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+        return "Saída: \(types.isEmpty ? "nenhuma" : types) · volume do sistema: \(Int(session.outputVolume * 100))%\nEngine: \(engine.isRunning ? "ativo" : "parado") · player: \(player.isPlaying ? "ativo" : "parado")\nCallbacks de microfone: \(callbacks) · erros de conversão: \(failures)\nFrames agendados: \(scheduled) · reprodução confirmada pelo iOS: \(played)\nFrames reproduzidos acumulados: \(playedLifetime)\nMixer: \(Int(engine.mainMixerNode.outputVolume * 100))% · player: \(Int(player.volume * 100))%"
+    }
     func setMuted(_ value: Bool) { lock.lock(); muted = value; epoch &+= 1; lock.unlock() }
     func current(_ value: UInt64) -> Bool { lock.lock(); defer { lock.unlock() }; return !muted && value == epoch }
     func start(input: @escaping @Sendable (Data, UInt64) -> Void) throws {
@@ -29,7 +38,7 @@ final class VoiceAudio: @unchecked Sendable {
         engine.attach(player); engine.connect(player, to: engine.mainMixerNode, format: format)
         node.installTap(onBus: 0, bufferSize: 1024, format: source) { [weak self] buffer, _ in
             guard let self else { return }
-            self.lock.lock(); let silent = self.muted; let epoch = self.epoch; self.lock.unlock()
+            self.lock.lock(); self.microphoneCallbacks += 1; let silent = self.muted; let epoch = self.epoch; self.lock.unlock()
             guard !silent else { return }
             let count = AVAudioFrameCount(ceil(Double(buffer.frameLength) * 24000 / source.sampleRate) + 64)
             guard let output = AVAudioPCMBuffer(pcmFormat: self.format, frameCapacity: count) else { return }
@@ -39,7 +48,10 @@ final class VoiceAudio: @unchecked Sendable {
                 if supplied { state.pointee = .noDataNow; return nil }
                 supplied = true; state.pointee = .haveData; return buffer
             }
-            guard status != .error, error == nil, let samples = output.floatChannelData?[0], output.frameLength > 0 else { return }
+            guard status != .error, error == nil, let samples = output.floatChannelData?[0], output.frameLength > 0 else {
+                if status == .error || error != nil { self.lock.lock(); self.conversionErrors += 1; self.lock.unlock() }
+                return
+            }
             let data = RealtimePCM.encode(UnsafeBufferPointer(start: samples, count: Int(output.frameLength)))
             input(data, epoch)
         }
@@ -62,7 +74,11 @@ final class VoiceAudio: @unchecked Sendable {
         scheduled += frames; spans[spans.count - 1].end = scheduled
         let generation = outputGeneration
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            DispatchQueue.main.async { guard let self, self.outputGeneration == generation else { return }; self.played = min(self.scheduled, self.played + frames) }
+            DispatchQueue.main.async {
+                guard let self, self.outputGeneration == generation else { return }
+                let confirmed = min(frames, self.scheduled - self.played)
+                self.played += confirmed; self.playedLifetime += confirmed
+            }
         }
         if !player.isPlaying { player.play() }
     }
