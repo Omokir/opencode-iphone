@@ -7,6 +7,8 @@ struct PendingUpload: Identifiable {
     let file: StagedUpload
     let root: String
     let path: String
+    let server: String
+    let connectionID: UUID
     var id: UUID { file.id }
 }
 struct FileReplacement: Identifiable {
@@ -66,6 +68,8 @@ struct FileReplacement: Identifiable {
     func download(_ file: RemoteFile, api: API) {
         guard !transferring else { return }
         let selectedRoot = root
+        let selectedServer = api.server
+        let selectedConnection = api.connectionID
         transferring = true
         error = nil
         notice = "Baixando \(file.name)… Mantenha app aberto."
@@ -73,6 +77,7 @@ struct FileReplacement: Identifiable {
             defer { transferring = false; task = nil }
             var activityID: UUID?
             do {
+                guard api.connected, api.server == selectedServer, api.connectionID == selectedConnection else { throw CancellationError() }
                 let id = try TransferActivity.shared.begin(server: api.server, name: file.name, destination: "Cache protegido do Pocket; use Salvar/Compartilhar para guardar em Arquivos", direction: "download", total: file.size)
                 activityID = id; TransferActivity.shared.bind(id) { [weak self] in self?.cancel() }
                 preview = try await api.downloadFile(root: selectedRoot, file: file, transferID: id, verification: { TransferActivity.shared.stage(id, state: "verifying") })
@@ -84,6 +89,8 @@ struct FileReplacement: Identifiable {
     func prepare(_ url: URL, api: API) {
         guard !transferring && !busy else { return }
         let selectedRoot = root
+        let selectedServer = api.server
+        let selectedConnection = api.connectionID
         let directory = path
         transferring = true
         error = nil
@@ -93,8 +100,9 @@ struct FileReplacement: Identifiable {
             do {
                 let file = try await Task.detached(priority: .userInitiated) { try PrivateTransferFiles.stage(url) }.value
                 try Task.checkCancellation()
+                guard api.connected, api.server == selectedServer, api.connectionID == selectedConnection else { throw CancellationError() }
                 let target = directory.isEmpty ? file.name : directory + "/" + file.name
-                let pending = PendingUpload(file: file, root: selectedRoot, path: target)
+                let pending = PendingUpload(file: file, root: selectedRoot, path: target, server: selectedServer, connectionID: selectedConnection)
                 if let existing = listing?.entries.first(where: { $0.name == file.name }) {
                     guard existing.kind == "file" && existing.readable && existing.version != nil else { throw TransferFailure.message("Destino protegido ou não é arquivo regular.") }
                     replacement = FileReplacement(pending: pending, existing: existing)
@@ -118,6 +126,7 @@ struct FileReplacement: Identifiable {
         var activityID: UUID?
         var attempted = false
         do {
+            guard api.connected, api.server == pending.server, api.connectionID == pending.connectionID else { throw PhoneError.message("Conexão mudou; envio antigo não será retomado automaticamente.") }
             let id = try TransferActivity.shared.begin(server: api.server, name: pending.file.name, destination: pending.root + ":/" + pending.path, direction: "upload", total: pending.file.size, uploadID: pending.file.id, root: pending.root, remotePath: pending.path, digest: pending.file.sha256)
             activityID = id; TransferActivity.shared.bind(id) { [weak self] in self?.cancel() }
             attempted = true

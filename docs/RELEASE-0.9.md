@@ -51,6 +51,9 @@ receipt without replay; receipt alone does not prove current remote bytes.
 
 Manual activity metadata is privately archived, at most 100 records. Relaunch
 marks unfinished manual entries uncertain; there is no persisted write-retry job.
+Manual staging is bound to server and connection generation; disconnect cancels
+only old-generation URLSession requests, not a new pairing request. An old manual
+proposal cannot resume against another server or newly paired connection.
 Cancel requests cancellation; a commit may already have arrived. Automatic queue
 resumption uses existing checksum/receipt safeguards. Pausing persists and keeps
 originals; no blanket delete/reset action was added to the center.
@@ -60,7 +63,7 @@ originals; no blanket delete/reset action was added to the center.
 Settings → **Diagnóstico e atualização** queries public GitHub only when requested,
 rate-limited locally to once/minute. Ready requires workflow status completed,
 conclusion success, expected non-expired artifact, and matching artifact/run SHA.
-Version comes from Info.plist at successful run's immutable SHA, not main branch.
+Version/build come from Info.plist at successful run's immutable SHA, not main branch.
 Links point to that build and its README/notes. Source-only changes are not called
 ready. Build success is not physical-device validation. GitHub login may be
 needed to download artifact; app never downloads/signs/installs silently and does

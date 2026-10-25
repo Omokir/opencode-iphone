@@ -44,6 +44,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
     private var speaking = false
     private var followNeeded = false
     private var boundServer = ""
+    private var boundConnectionID: UUID?
     var open: Bool { active || connecting }
 
     func start(_ api: API, session: Session, monitor: ChatStore) async {
@@ -51,6 +52,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
         let token = UUID(); generation = token
         connecting = true; muted = false; error = nil; caption = ""; status = "Solicitando microfone…"
         boundServer = api.server; toolIDs = []; ignoredResponses = []
+        boundConnectionID = api.connectionID
         diagnostics = VoiceDiagnostics(); responseAudioPackets = 0; diagnosticsText = diagnostics.text
         usage = VoiceUsageLedger(); usageText = "Nenhum uso reportado pela API."; elapsedSeconds = 0
         maximumSeconds = VoiceBudget.minutes(UserDefaults.standard.integer(forKey: "voice.minutes")) * 60
@@ -60,7 +62,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
             let allowed = await withCheckedContinuation { continuation in AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) } }
             guard generation == token, connecting, !Task.isCancelled else { return }
             guard allowed else { throw PhoneError.message("Microfone não autorizado. Altere permissão nos Ajustes do iOS.") }
-            guard api.connected else { throw PhoneError.message("Pareie notebook antes de iniciar chamada com ferramentas.") }
+            guard api.connected, api.connectionID == boundConnectionID else { throw PhoneError.message("Pareie notebook antes de iniciar chamada com ferramentas.") }
             let model = UserDefaults.standard.string(forKey: "voice.model") ?? "gpt-realtime"
             let voice = UserDefaults.standard.string(forKey: "voice.voice") ?? "marin"
             guard RealtimeProtocol.models.contains(model), ["marin", "cedar"].contains(voice) else { throw PhoneError.message("Selecione modelo e voz válidos nos ajustes.") }
@@ -84,7 +86,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
             var data = Data()
             for try await byte in bytes { guard data.count < 256 * 1024 else { throw PhoneError.message("Resposta de sessão excedeu limite.") }; data.append(byte) }
             guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any], let secret = object["value"] as? String, secret.hasPrefix("ek_"), secret.count < 1024 else { throw PhoneError.message("API não retornou credencial temporária válida.") }
-            guard generation == token, connecting, api.server == boundServer else { return }
+            guard generation == token, connecting, api.server == boundServer, api.connectionID == boundConnectionID else { return }
             var wsRequest = URLRequest(url: URL(string: "wss://api.openai.com/v1/realtime?model=" + API.escape(model))!)
             wsRequest.setValue("Bearer " + secret, forHTTPHeaderField: "Authorization")
             let ws = network.webSocketTask(with: wsRequest); ws.maximumMessageSize = 512 * 1024; socket = ws; ws.resume()
@@ -201,9 +203,9 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
                     } else { pending = call; notebook = "Proposta aguardando confirmação visual" }
                 } else {
                     Task { [weak self] in
-                        guard let self, self.generation == token, self.active, api.connected, api.server == self.boundServer else { return }
+                        guard let self, self.generation == token, self.active, api.connected, api.server == self.boundServer, api.connectionID == self.boundConnectionID else { return }
                         await monitor.refresh(api, session: session)
-                        guard self.generation == token, self.active, api.connected, api.server == self.boundServer else { return }
+                        guard self.generation == token, self.active, api.connected, api.server == self.boundServer, api.connectionID == self.boundConnectionID else { return }
                         try? await self.toolResult(call.id, result: self.summary(monitor), token: token)
                     }
                 }
@@ -233,7 +235,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
         if generation == token { followNeeded = true }
     }
     func approve(_ call: VoiceToolCall, api: API, session: Session, monitor: ChatStore) async {
-        guard active, pending?.id == call.id, jobTask == nil, api.connected, api.server == boundServer, let text = call.task else { return }
+        guard active, pending?.id == call.id, jobTask == nil, api.connected, api.server == boundServer, api.connectionID == boundConnectionID, let text = call.task else { return }
         pending = nil
         let token = generation
         let requestID = RequestID.message()
@@ -246,7 +248,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
         runningRequestID = requestID
         notebook = "Enviando tarefa confirmada…"
         jobTask = Task { [weak self] in
-            guard let self, self.generation == token, self.active, api.connected, api.server == self.boundServer, !Task.isCancelled else { return }
+            guard let self, self.generation == token, self.active, api.connected, api.server == self.boundServer, api.connectionID == self.boundConnectionID, !Task.isCancelled else { return }
             do {
                 let _: Accepted = try await api.request("/api/session/\(session.id)/prompt", method: "POST", body: ["id": requestID, "text": text, "files": []])
                 TaskHistory.shared.set(requestID, server: self.boundServer, state: "admitted")
@@ -254,9 +256,9 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
                 self.notebook = "Tarefa admitida pelo notebook. Conversa por voz continua."
                 for _ in 0..<300 {
                     try Task.checkCancellation()
-                    guard self.generation == token, self.active, api.connected, api.server == self.boundServer else { return }
+                    guard self.generation == token, self.active, api.connected, api.server == self.boundServer, api.connectionID == self.boundConnectionID else { return }
                     await monitor.refresh(api, session: session)
-                    guard self.generation == token, self.active, api.connected, api.server == self.boundServer, !Task.isCancelled else { return }
+                    guard self.generation == token, self.active, api.connected, api.server == self.boundServer, api.connectionID == self.boundConnectionID, !Task.isCancelled else { return }
                     let match = TaskReplyMatch.find(requestID: requestID, messages: monitor.latestPage)
                     if case .ambiguous = match {
                         self.notebook = "Outra mensagem apareceu antes de resposta identificável. Confira conversa; não houve reenvio."

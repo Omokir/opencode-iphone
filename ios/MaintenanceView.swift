@@ -70,10 +70,11 @@ struct MaintenanceView: View {
         Form {
             Section("Versão") {
                 LabeledContent("Instalada", value: version)
+                LabeledContent("Build instalado", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
                 Text(update).font(.caption)
                 Button("Procurar IPA com build aprovado") { Task { await checkUpdate() } }.disabled(checking)
                 if let readyBuild {
-                    Link("Abrir build \(readyBuild.version) e baixar IPA", destination: readyBuild.runURL)
+                    Link("Abrir \(readyBuild.version) (build \(readyBuild.build)) e baixar IPA", destination: readyBuild.runURL)
                     Link("Notas e documentação desse build", destination: readyBuild.notesURL)
                     Text("Artefato vence em: \(readyBuild.expires)").font(.caption2)
                 }
@@ -93,7 +94,8 @@ struct MaintenanceView: View {
         lastCheck = Date(); readyBuild = nil
         do {
             let build = try await VerifiedUpdate.fetch(); readyBuild = build
-            update = build.version.compare(version, options: .numeric) == .orderedDescending ? "Atualização com build aprovado: \(build.version)." : "Último IPA com build aprovado: \(build.version). Instalada não está atrás dele."
+            let installedBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+            update = build.newer(than: version, build: installedBuild) ? "Atualização com build aprovado: \(build.version), build \(build.build)." : "Último IPA aprovado: \(build.version), build \(build.build). Instalada não está atrás dele."
         } catch { update = "Atualização não confirmada: \(error.localizedDescription). Instalada permanece \(version)." }
     }
 }

@@ -47,6 +47,7 @@ final class API: ObservableObject {
     @Published var server: String
     @Published var reachable: Bool?
     @Published var connectionIssue: String?
+    @Published private(set) var connectionID = UUID()
     private var token: String?
     let transport: URLSession
 
@@ -113,6 +114,7 @@ final class API: ObservableObject {
         guard let url = URL(string: base + path) else { throw PhoneError.message("Endereço inválido.") }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         request.httpMethod = method
+        request.setValue(connectionID.uuidString, forHTTPHeaderField: "X-Pocket-Connection-ID")
         if authenticated {
             guard let token else { throw PhoneError.message("Conecte novamente ao notebook.") }
             request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
@@ -162,6 +164,11 @@ final class API: ObservableObject {
 
     func disconnect() {
         BackgroundInbox.shared.cancelAll()
+        let previousConnection = connectionID.uuidString
+        connectionID = UUID()
+        transport.getAllTasks { tasks in
+            tasks.filter { $0.originalRequest?.value(forHTTPHeaderField: "X-Pocket-Connection-ID") == previousConnection }.forEach { $0.cancel() }
+        }
         Vault.clear()
         token = nil
         connected = false

@@ -2,11 +2,16 @@ import Foundation
 
 struct VerifiedUpdate {
     let version: String
+    let build: String
     let runID: Int
     let sha: String
     let expires: String
     var runURL: URL { URL(string: "https://github.com/Omokir/opencode-iphone/actions/runs/\(runID)")! }
     var notesURL: URL { URL(string: "https://github.com/Omokir/opencode-iphone/blob/\(sha)/README.md")! }
+    func newer(than version: String, build: String) -> Bool {
+        let order = self.version.compare(version, options: .numeric)
+        return order == .orderedDescending || (order == .orderedSame && self.build.compare(build, options: .numeric) == .orderedDescending)
+    }
     static func fetch() async throws -> VerifiedUpdate {
         let config = URLSessionConfiguration.ephemeral
         config.urlCache = nil; config.httpCookieStorage = nil; config.urlCredentialStorage = nil
@@ -39,7 +44,8 @@ struct VerifiedUpdate {
         guard let info = try PropertyListSerialization.propertyList(from: plist, format: nil) as? [String: Any],
               let version = info["CFBundleShortVersionString"] as? String, version.count <= 24,
               version.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == ".") }) else { throw PhoneError.message("Versão do artefato não confirmada no commit correspondente.") }
+        guard let build = info["CFBundleVersion"] as? String, !build.isEmpty, build.count <= 12, build.allSatisfy({ $0.isASCII && $0.isNumber }) else { throw PhoneError.message("Número de build não confirmado.") }
         let expiry = artifacts.first(where: { $0["name"] as? String == "OpenCode-Pocket-iPhone" })?["expires_at"] as? String ?? "não informada"
-        return VerifiedUpdate(version: version, runID: id, sha: sha, expires: String(expiry.prefix(40)))
+        return VerifiedUpdate(version: version, build: build, runID: id, sha: sha, expires: String(expiry.prefix(40)))
     }
 }

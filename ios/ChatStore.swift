@@ -164,6 +164,7 @@ final class ChatStore: ObservableObject {
         defer { sending = false }
         var attempted = false
         let submittedServer = api.server
+        let submittedConnection = api.connectionID
         do {
             try PendingFile.validate(files)
             if !files.isEmpty, let model = session.model {
@@ -183,7 +184,7 @@ final class ChatStore: ObservableObject {
             }
             var body = content
             body["id"] = pendingID!
-            guard api.connected, api.server == submittedServer else { throw PhoneError.message("Conexão mudou antes do envio.") }
+            guard api.connected, api.server == submittedServer, api.connectionID == submittedConnection else { throw PhoneError.message("Conexão mudou antes do envio.") }
             try TaskHistory.shared.begin(server: submittedServer, sessionID: session.id, requestID: pendingID!, text: text)
             attempted = true
             let _: Accepted = try await api.request("/api/session/\(session.id)/prompt", method: "POST",

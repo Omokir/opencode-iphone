@@ -126,6 +126,7 @@ struct VoiceCallView: View {
                 .onChange(of: phase) { _, value in if value == .background { voice.end(); soundTest.stop() } }
                 .onChange(of: api.connected) { _, connected in if !connected { voice.end() } }
                 .onChange(of: api.server) { _, _ in voice.end() }
+                .onChange(of: api.connectionID) { _, _ in voice.end() }
                 .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { _ in if voice.open { voice.end(reason: "Áudio interrompido pelo iOS; toque Ligar para retomar manualmente.") } }
                 .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { notification in
                     let raw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt

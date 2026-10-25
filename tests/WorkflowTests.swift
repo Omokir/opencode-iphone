@@ -39,6 +39,11 @@ import Foundation
         precondition(VerifiedBuildPolicy.ready(run, artifacts: [artifact]))
         precondition(!VerifiedBuildPolicy.ready(run, artifacts: [["name": "OpenCode-Pocket-iPhone", "expired": true]]))
         precondition(!VerifiedBuildPolicy.validSHA("../main"))
+        let approved = VerifiedUpdate(version: "0.9.0", build: "17", runID: 1, sha: sha, expires: "fixture")
+        precondition(approved.newer(than: "0.8.1", build: "99"))
+        precondition(approved.newer(than: "0.9.0", build: "16"))
+        precondition(!approved.newer(than: "0.9.0", build: "17"))
+        precondition(!approved.newer(than: "0.10.0", build: "1"))
         print("PASS: bounded voice budgets, deduplicated reported usage, no cross-user reply matching, uncertain recovery, immutable confirmed results and build/artifact commit binding")
     }
 }

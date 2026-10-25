@@ -33,7 +33,8 @@ struct VoiceUsageLedger {
         if let count = usage.output_token_details?.audio_tokens, (0...outgoing).contains(count) { audioOutput += count; audioOutputReports += 1 }
     }
     var summary: String {
-        "Uso reportado: \(input) tokens de entrada · \(output) de saída\nÁudio entrada: \(audioInputReports == 0 ? "não reportado" : "\(audioInput) tokens em \(audioInputReports) respostas")\nÁudio saída: \(audioOutputReports == 0 ? "não reportado" : "\(audioOutput) tokens em \(audioOutputReports) respostas")\n\(responses) respostas observadas · \(missing) sem uso completo. Não é fatura nem limite monetário; último turno pode não ter sido reportado."
+        guard responses > missing else { return "Uso não reportado integralmente pela API (\(responses) respostas observadas). Isso não significa custo zero. Confira faturamento no provedor." }
+        return "Uso reportado: \(input) tokens de entrada · \(output) de saída\nÁudio entrada: \(audioInputReports == 0 ? "não reportado" : "\(audioInput) tokens em \(audioInputReports) respostas")\nÁudio saída: \(audioOutputReports == 0 ? "não reportado" : "\(audioOutput) tokens em \(audioOutputReports) respostas")\n\(responses) respostas observadas · \(missing) sem uso completo. Não é fatura nem limite monetário; último turno pode não ter sido reportado."
     }
 }
 
