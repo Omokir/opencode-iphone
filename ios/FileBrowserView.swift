@@ -71,10 +71,14 @@ struct FileReplacement: Identifiable {
         notice = "Baixando \(file.name)… Mantenha app aberto."
         task = Task {
             defer { transferring = false; task = nil }
+            var activityID: UUID?
             do {
-                preview = try await api.downloadFile(root: selectedRoot, file: file)
+                let id = try TransferActivity.shared.begin(server: api.server, name: file.name, destination: "Cache protegido do Pocket; use Salvar/Compartilhar para guardar em Arquivos", direction: "download", total: file.size)
+                activityID = id; TransferActivity.shared.bind(id) { [weak self] in self?.cancel() }
+                preview = try await api.downloadFile(root: selectedRoot, file: file, transferID: id, verification: { TransferActivity.shared.stage(id, state: "verifying") })
+                TransferActivity.shared.finish(id, state: "completed")
                 notice = "Download verificado. Use Salvar/Compartilhar para guardar no app Arquivos."
-            } catch { self.error = "Download não concluído: \(error.localizedDescription)"; notice = nil }
+            } catch { if let activityID { TransferActivity.shared.finish(activityID, state: "uncertain") }; self.error = "Download não concluído: \(error.localizedDescription)"; notice = nil }
         }
     }
     func prepare(_ url: URL, api: API) {
@@ -111,18 +115,26 @@ struct FileReplacement: Identifiable {
     private func send(_ pending: PendingUpload, expected: String?, api: API) async {
         notice = "Enviando \(pending.file.name)… Mantenha app aberto."
         error = nil
+        var activityID: UUID?
+        var attempted = false
         do {
-            let receipt = try await api.uploadFile(pending.file, root: pending.root, path: pending.path, expected: expected)
+            let id = try TransferActivity.shared.begin(server: api.server, name: pending.file.name, destination: pending.root + ":/" + pending.path, direction: "upload", total: pending.file.size, uploadID: pending.file.id, root: pending.root, remotePath: pending.path, digest: pending.file.sha256)
+            activityID = id; TransferActivity.shared.bind(id) { [weak self] in self?.cancel() }
+            attempted = true
+            let receipt = try await api.uploadFile(pending.file, root: pending.root, path: pending.path, expected: expected, transferID: id, verification: { TransferActivity.shared.stage(id, state: "verifying") })
             guard receipt.path == pending.path && receipt.root == pending.root else { throw TransferFailure.message("Destino do recibo não confere.") }
             unconfirmed = nil
+            TransferActivity.shared.finish(id, state: "completed")
             notice = "Enviado e verificado: \(pending.file.name)."
             await load(api)
         } catch TransferFailure.conflict(let existing, let message) {
+            if let activityID { TransferActivity.shared.finish(activityID, state: "blocked") }
             replacement = FileReplacement(pending: pending, existing: existing)
             notice = message
         } catch {
-            unconfirmed = pending
-            self.error = "Envio não confirmado: \(error.localizedDescription) Confira recibo e pasta antes de novo envio."
+            if let activityID { TransferActivity.shared.finish(activityID, state: "uncertain") }
+            if attempted { unconfirmed = pending }
+            self.error = (attempted ? "Envio não confirmado: " : "Não foi enviado: ") + error.localizedDescription + " Confira recibo e pasta antes de novo envio."
             notice = nil
         }
     }
@@ -208,6 +220,7 @@ struct FileBrowserView: View {
             }
             .navigationTitle("Arquivos do notebook").navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .bottomBar) { NavigationLink("Central de transferências") { TransferCenterView() } }
                 ToolbarItem(placement: .topBarLeading) { Button("Fechar") { dismiss() }.disabled(store.transferring) }
                 ToolbarItem(placement: .topBarTrailing) { Button("Enviar arquivo", systemImage: "square.and.arrow.up") { importing = true }.disabled(store.busy || store.transferring || store.listing == nil) }
             }

@@ -2,6 +2,7 @@ import json
 import hashlib
 import io
 import uuid
+import subprocess
 from pathlib import Path
 import tempfile
 import threading
@@ -26,6 +27,7 @@ class GatewayTests(unittest.TestCase):
         self.http.files = server.FileBrowser(self.state, roots={'home': {'name': 'Fixture', 'path': str(self.state)}})
         self.http.inbox = server.PhoneInbox(self.state / 'inbox-state', home=self.state)
         self.http.resumable = server.ResumableInbox(self.http.inbox)
+        self.http.power = server.NotebookPower(run=lambda args, **kwargs: subprocess.CompletedProcess(args, 1, '', ''))
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
 
@@ -53,6 +55,12 @@ class GatewayTests(unittest.TestCase):
     def test_authentication_required(self):
         self.assertEqual(self.request('/api/info')[0], 401)
         self.assertEqual(self.request('/api/info', 'wrong')[0], 401)
+
+    def test_power_routes_do_not_execute_without_explicit_device_ticket(self):
+        self.assertEqual(self.request('/phone/power/status')[0], 401)
+        self.assertEqual(self.request('/phone/power/status', 'test-token')[1]['powerOff'], 'unavailable')
+        self.assertEqual(self.request('/phone/power/prepare', 'test-token', method='POST')[0], 403)
+        self.assertEqual(self.request('/phone/power/off', 'test-token', {'ticket': 'not-issued'})[0], 409)
 
     def test_no_config_or_shell_or_credentials(self):
         for path in ['/api/config', '/api/credential', '/api/shell', '/api/fs/read/private']:

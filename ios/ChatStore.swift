@@ -4,6 +4,7 @@ import Combine
 @MainActor
 final class ChatStore: ObservableObject {
     @Published var messages: [Message] = []
+    @Published private(set) var latestPage: [Message] = []
     @Published var permissions: [Permission] = []
     @Published var error: String?
     @Published var sending = false
@@ -58,6 +59,7 @@ final class ChatStore: ObservableObject {
     }
 
     func refresh(_ api: API, session: Session, olderPage: Bool = false) async {
+        let refreshedServer = api.server
         if messages.isEmpty, !refreshed, !olderPage,
            let page: Page<Message> = api.cached("/api/session/\(session.id)/message?limit=50&order=desc") {
             applyMessages(page, ticket: 0)
@@ -72,6 +74,8 @@ final class ChatStore: ObservableObject {
             if olderPage, let cursor = olderCursor { path += "&cursor=" + API.escape(cursor) }
             else { path += "&order=desc" }
             let page: Page<Message> = try await api.request(path)
+            guard api.connected, api.server == refreshedServer else { return }
+            if !olderPage { latestPage = page.data }
             if olderPage || !refreshed { olderCursor = page.cursor?.next }
             applyMessages(page, ticket: currentTicket, older: olderPage)
             showingCache = false
@@ -99,6 +103,9 @@ final class ChatStore: ObservableObject {
             error = nil
             applySession(sessionInfo.data, ticket: currentTicket, revision: revision)
             refreshed = true
+            if !olderPage, api.connected, api.server == refreshedServer {
+                TaskHistory.shared.reconcile(server: refreshedServer, session: sessionInfo.data, messages: page.data, waitingPermission: !permissions.isEmpty, waitingQuestion: !questions.isEmpty)
+            }
         } catch is CancellationError { }
         catch let failure as URLError where failure.code == .cancelled { }
         catch { self.error = ConnectionAdvice.describe(error) }
@@ -156,6 +163,7 @@ final class ChatStore: ObservableObject {
         sending = true
         defer { sending = false }
         var attempted = false
+        let submittedServer = api.server
         do {
             try PendingFile.validate(files)
             if !files.isEmpty, let model = session.model {
@@ -175,17 +183,21 @@ final class ChatStore: ObservableObject {
             }
             var body = content
             body["id"] = pendingID!
+            guard api.connected, api.server == submittedServer else { throw PhoneError.message("Conexão mudou antes do envio.") }
+            try TaskHistory.shared.begin(server: submittedServer, sessionID: session.id, requestID: pendingID!, text: text)
             attempted = true
             let _: Accepted = try await api.request("/api/session/\(session.id)/prompt", method: "POST",
                                                   body: body)
+            TaskHistory.shared.set(pendingID!, server: submittedServer, state: "admitted")
             pendingID = nil
             pendingFingerprint = nil
             sendError = nil
             sendUnconfirmed = false
-            await refresh(api, session: session)
+            if api.server == submittedServer && api.connected { await refresh(api, session: session) }
             return true
         } catch {
             if attempted { sendUnconfirmed = true }
+            if attempted, let pendingID { TaskHistory.shared.set(pendingID, server: submittedServer, state: "uncertain") }
             self.sendError = (attempted ? "Envio não confirmado: " : "Não foi enviado: ") + error.localizedDescription + " Confira conversa antes de tentar novamente. Texto e anexos foram mantidos."
             return false
         }

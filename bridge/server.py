@@ -20,6 +20,7 @@ from files import FileBrowser, FileError
 from events import session_hint
 from devices import DeviceTokens
 from chat_search import search_page
+from power import NotebookPower
 from resume import ResumableInbox
 from inbox import PhoneInbox
 from storage import storage_status
@@ -37,11 +38,11 @@ SEARCH_SLOTS = threading.BoundedSemaphore(2)
 RULES = {
     'GET': [r'/api/info', r'/api/session', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
-            r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices',
+            r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices', r'/phone/power/status',
             r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)'],
     'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
-             r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke'],
+             r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)'],
     'PATCH': [r'/api/session/ses[^/]+'],
 }
 
@@ -363,6 +364,12 @@ class Handler(BaseHTTPRequestHandler):
                         self.headers.get('X-Upload-ID', ''), self.headers.get('X-Content-SHA256', ''), expected)
                     return self.reply(200, result)
             body = self.rfile.read(length) if length else None
+            if path == '/phone/power/status':
+                return self.reply(200, self.server.power.status())
+            if path == '/phone/power/prepare':
+                return self.reply(*self.server.power.prepare(current_device))
+            if path == '/phone/power/off':
+                return self.reply(*self.server.power.power_off(current_device, json.loads(body or b'{}').get('ticket')))
             if path == '/phone/devices':
                 return self.reply(200, device_tokens.listing(current_device))
             if path == '/phone/devices/revoke':
@@ -440,5 +447,6 @@ if __name__ == '__main__':
     server.files = FileBrowser(STATE)
     server.inbox = PhoneInbox(STATE)
     server.resumable = ResumableInbox(server.inbox)
+    server.power = NotebookPower()
     server.daemon_threads = True
     server.serve_forever()

@@ -54,13 +54,14 @@ enum PrivateTransferFiles {
 }
 
 extension API {
-    func downloadFile(root: String, file: RemoteFile) async throws -> LocalPreview {
+    func downloadFile(root: String, file: RemoteFile, transferID: UUID? = nil, verification: (@MainActor () -> Void)? = nil) async throws -> LocalPreview {
         #if SNAPSHOT
         return try PrivateTransferFiles.preview(PendingFile(name: file.name, mime: "text/plain", data: Data("Arquivo de exemplo".utf8)))
         #else
         guard (file.size ?? 0) <= PrivateTransferFiles.maxBytes else { throw TransferFailure.message("Limite de 64 MB por transferência.") }
         let path = "/phone/files/download?root=" + Self.escape(root) + "&path=" + Self.escape(file.path)
         var request = try makeRequest(path)
+        if let transferID { request.setValue(transferID.uuidString, forHTTPHeaderField: "X-Transfer-ID") }
         request.timeoutInterval = 300
         if let version = file.version { request.setValue(version, forHTTPHeaderField: "If-Match") }
         let (temporary, response) = try await transport.download(for: request)
@@ -74,6 +75,7 @@ extension API {
         try FileManager.default.moveItem(at: temporary, to: destination)
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: destination.path)
         let actualSize = try destination.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
+        verification?()
         guard actualSize <= PrivateTransferFiles.maxBytes, let expected = http.value(forHTTPHeaderField: "X-Content-SHA256"),
               try await Task.detached(priority: .userInitiated, operation: { try PrivateTransferFiles.digest(destination) }).value == expected else {
             try? FileManager.default.removeItem(at: destination)
@@ -82,7 +84,7 @@ extension API {
         return LocalPreview(url: destination, name: file.name)
         #endif
     }
-    func uploadFile(_ file: StagedUpload, root: String, path: String, expected: String?, inbox: Bool = false) async throws -> UploadReceipt {
+    func uploadFile(_ file: StagedUpload, root: String, path: String, expected: String?, inbox: Bool = false, transferID: UUID? = nil, verification: (@MainActor () -> Void)? = nil) async throws -> UploadReceipt {
         #if SNAPSHOT
         return UploadReceipt(uploadID: file.id.uuidString, root: root, path: path, size: file.size, sha256: file.sha256, version: "fixture-version")
         #else
@@ -92,6 +94,7 @@ extension API {
         request.setValue(String(file.size), forHTTPHeaderField: "Content-Length")
         request.setValue(file.id.uuidString, forHTTPHeaderField: "X-Upload-ID")
         request.setValue(file.sha256, forHTTPHeaderField: "X-Content-SHA256")
+        if let transferID { request.setValue(transferID.uuidString, forHTTPHeaderField: "X-Transfer-ID") }
         if let expected { request.setValue(expected, forHTTPHeaderField: "If-Match") }
         else { request.setValue("*", forHTTPHeaderField: "If-None-Match") }
         let (data, response) = try await transport.upload(for: request, fromFile: file.url)
@@ -106,6 +109,7 @@ extension API {
             throw TransferFailure.message(issue?.error ?? "Envio não confirmado. Confira recibo e pasta.")
         }
         let receipt = try JSONDecoder().decode(UploadReceipt.self, from: data)
+        verification?()
         guard receipt.uploadID.lowercased() == file.id.uuidString.lowercased(), receipt.sha256 == file.sha256 else { throw TransferFailure.message("Recibo não confere. Verifique pasta antes de novo envio.") }
         return receipt
         #endif

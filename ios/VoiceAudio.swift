@@ -17,8 +17,22 @@ final class VoiceAudio: @unchecked Sendable {
     private var spans: [(id: String, start: Int64, end: Int64)] = []
     private var microphoneCallbacks = 0
     private var conversionErrors = 0
+    private var microphoneLevel: Float = 0
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)!
     var hasPendingAudio: Bool { scheduled > played }
+    var level: Float { lock.lock(); defer { lock.unlock() }; return muted ? 0 : microphoneLevel }
+    var routeLabel: String {
+        let session = AVAudioSession.sharedInstance()
+        let types = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ", ")
+        return "\(types.isEmpty ? "Sem saída" : types) · volume \(Int(session.outputVolume * 100))%"
+    }
+    func useSpeaker() throws {
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+        guard outputs.allSatisfy({ [.builtInReceiver, .builtInSpeaker].contains($0.portType) }) else {
+            throw PhoneError.message("Saída externa conectada. Escolha rota pelo seletor de áudio do iOS.")
+        }
+        try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+    }
     var diagnostics: String {
         lock.lock(); let callbacks = microphoneCallbacks; let failures = conversionErrors; lock.unlock()
         let session = AVAudioSession.sharedInstance()
@@ -53,6 +67,8 @@ final class VoiceAudio: @unchecked Sendable {
                 return
             }
             let data = RealtimePCM.encode(UnsafeBufferPointer(start: samples, count: Int(output.frameLength)))
+            let peak = (0..<Int(output.frameLength)).reduce(Float(0)) { max($0, abs(samples[$1].isFinite ? samples[$1] : 0)) }
+            self.lock.lock(); self.microphoneLevel = min(1, peak); self.lock.unlock()
             input(data, epoch)
         }
         tap = true

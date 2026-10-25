@@ -7,7 +7,7 @@ SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
 xcrun --sdk iphonesimulator swiftc -swift-version 5 -parse-as-library -D SNAPSHOT \
   -target "$ARCH-apple-ios17.0-simulator" -sdk "$SDK" \
-  -framework SwiftUI -framework UIKit -framework Security -framework CryptoKit -framework QuickLook -framework ImageIO -framework LocalAuthentication -framework UserNotifications -framework AVFoundation -framework AVFAudio \
+  -framework SwiftUI -framework UIKit -framework Security -framework CryptoKit -framework QuickLook -framework ImageIO -framework LocalAuthentication -framework UserNotifications -framework AVFoundation -framework AVFAudio -framework AVKit \
   ios/*.swift \
   -o "$APP/OpenCodePocket"
 cp ios/Info.plist "$APP/Info.plist"

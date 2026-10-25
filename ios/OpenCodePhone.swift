@@ -120,6 +120,8 @@ struct SessionsView: View {
     @State private var fileBrowser = false
     @State private var inboxSettings = false
     @State private var projectPicker = false
+    @State private var taskHistory = false
+    @State private var transferCenter = false
     @State private var hostStatus: HostStatus?
     @State private var hostChecked: Date?
     @State private var hostStatusFailed = false
@@ -226,6 +228,8 @@ struct SessionsView: View {
                         Button("Arquivos do notebook", systemImage: "folder") { fileBrowser = true }
                         Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
                         Menu {
+                            Button("Tarefas deste iPhone", systemImage: "checklist") { taskHistory = true }
+                            Button("Central de transferências", systemImage: "arrow.up.arrow.down") { transferCenter = true }
                             Button("Projetos favoritos", systemImage: "star") { projectPicker = true }
                             Button("Pasta automática do iPhone", systemImage: "arrow.up.doc") { inboxSettings = true }
                             Button("Controlar meu iPhone (USB)", systemImage: "cable.connector") { phoneControl = true }
@@ -254,6 +258,8 @@ struct SessionsView: View {
             .onChange(of: path.count) { _, count in if count == 0 { Task { await load() } } }
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $projectPicker) { ProjectsView { session in sessions.insert(session, at: 0); path.append(session) } }
+            .sheet(isPresented: $taskHistory) { NavigationStack { TaskHistoryView().toolbar { Button("Fechar") { taskHistory = false } } } }
+            .sheet(isPresented: $transferCenter) { NavigationStack { TransferCenterView().toolbar { Button("Fechar") { transferCenter = false } } } }
             .sheet(isPresented: $phoneControl) { PhoneControlView() }
             .sheet(isPresented: $fileBrowser) { FileBrowserView() }
             .sheet(isPresented: $inboxSettings) { InboxSyncView() }
@@ -863,6 +869,9 @@ struct SettingsView: View {
                     Toggle("Mostrar diagnósticos experimentais", isOn: $advanced).onChange(of: advanced) { _, value in UserDefaults.standard.set(value, forKey: "settings.advanced") }
                 }
                 Section("Manutenção") {
+                    NavigationLink("Tarefas deste iPhone") { TaskHistoryView() }
+                    NavigationLink("Central de transferências") { TransferCenterView() }
+                    NavigationLink("Energia · desligar notebook") { NotebookPowerView() }
                     NavigationLink("Voz · OpenAI Realtime") { VoiceSettingsView() }
                     NavigationLink("Notificações opcionais") { NotificationSettingsView() }
                     NavigationLink("Aparelhos pareados") { PairedDevicesView() }

@@ -10,6 +10,8 @@ Projects/system integrations: [0.7.0 supported features and pending limits](docs
 
 Voice: [0.8.0 Realtime architecture, costs and physical test limits](docs/VOICE-0.8.md).
 
+Latest improvements: [0.9.0 usage, task recovery, transfers, updates and power limits](docs/RELEASE-0.9.md).
+
 ## Included
 
 - Existing sessions, new sessions in a notebook directory, paged history.

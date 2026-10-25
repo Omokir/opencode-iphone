@@ -60,6 +60,8 @@ struct MaintenanceView: View {
     @EnvironmentObject var api: API
     @State private var update = "Não consultado"
     @State private var checking = false
+    @State private var readyBuild: VerifiedUpdate?
+    @State private var lastCheck: Date?
     private var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—" }
     private var diagnostics: String {
         "OpenCode Pocket \(version)\niOS \(UIDevice.current.systemVersion)\nPareado: \(api.connected ? "sim" : "não")\nÚltima conexão HTTP: \(api.reachable.map { $0 ? "respondeu" : "falhou" } ?? "não consultada")\nControle remoto sem USB: não suportado\nSem tokens, domínio, IDs, arquivos ou conteúdo de conversas."
@@ -69,9 +71,14 @@ struct MaintenanceView: View {
             Section("Versão") {
                 LabeledContent("Instalada", value: version)
                 Text(update).font(.caption)
-                Button("Consultar versão no código público") { Task { await checkUpdate() } }.disabled(checking)
+                Button("Procurar IPA com build aprovado") { Task { await checkUpdate() } }.disabled(checking)
+                if let readyBuild {
+                    Link("Abrir build \(readyBuild.version) e baixar IPA", destination: readyBuild.runURL)
+                    Link("Notas e documentação desse build", destination: readyBuild.notesURL)
+                    Text("Artefato vence em: \(readyBuild.expires)").font(.caption2)
+                }
                 Link("Abrir builds no GitHub", destination: URL(string: "https://github.com/Omokir/opencode-iphone/actions/workflows/ios.yml")!)
-                Text("Consulta pública ao GitHub, somente quando solicitada. Versão no código não garante IPA aprovado. Assinatura e instalação são etapas separadas.").font(.caption).foregroundStyle(.secondary)
+                Text("Consulta pública somente ao tocar. Exige workflow concluído com sucesso e artefato não expirado do mesmo commit; versão vem desse commit, não do código em desenvolvimento. Download pode exigir login GitHub. Assinatura, instalação e teste físico são etapas separadas.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Diagnóstico sem dados privados") {
                 Text(diagnostics).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
@@ -80,20 +87,13 @@ struct MaintenanceView: View {
         }.navigationTitle("Manutenção")
     }
     func checkUpdate() async {
+        guard !checking else { return }
+        if let lastCheck, Date().timeIntervalSince(lastCheck) < 60 { update = "Aguarde um minuto antes de consultar novamente."; return }
         checking = true; defer { checking = false }
-        let config = URLSessionConfiguration.ephemeral
-        config.urlCache = nil; config.timeoutIntervalForResource = 15
-        let session = URLSession(configuration: config); defer { session.invalidateAndCancel() }
+        lastCheck = Date(); readyBuild = nil
         do {
-            let (bytes, response) = try await session.bytes(from: URL(string: "https://raw.githubusercontent.com/Omokir/opencode-iphone/main/ios/Info.plist")!)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-            var data = Data()
-            for try await byte in bytes { guard data.count < 65536 else { throw URLError(.dataLengthExceedsMaximum) }; data.append(byte) }
-            let info = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
-            guard let remote = info?["CFBundleShortVersionString"] as? String else { throw URLError(.cannotParseResponse) }
-            update = remote.compare(version, options: .numeric) == .orderedDescending
-                ? "Código mais novo: \(remote). Confira build antes de instalar."
-                : "Código público: \(remote). Versão instalada não está atrás desse código."
-        } catch { update = "Consulta indisponível. Versão instalada permanece \(version)." }
+            let build = try await VerifiedUpdate.fetch(); readyBuild = build
+            update = build.version.compare(version, options: .numeric) == .orderedDescending ? "Atualização com build aprovado: \(build.version)." : "Último IPA com build aprovado: \(build.version). Instalada não está atrás dele."
+        } catch { update = "Atualização não confirmada: \(error.localizedDescription). Instalada permanece \(version)." }
     }
 }
