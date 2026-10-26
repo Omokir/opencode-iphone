@@ -12,6 +12,8 @@ Voice: [0.8.0 Realtime architecture, costs and physical test limits](docs/VOICE-
 
 Latest improvements: [0.9.0 usage, task recovery, transfers, updates and power limits](docs/RELEASE-0.9.md).
 
+History ordering: [0.9.1 shared notebook activity order and sync boundaries](docs/SESSION-ORDER.md).
+
 ## Included
 
 - Existing sessions, new sessions in a notebook directory, paged history.

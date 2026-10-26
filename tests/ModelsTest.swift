@@ -4,6 +4,14 @@ import Foundation
 struct ModelsTest {
     static func main() throws {
         let decoder = JSONDecoder()
+        let activeOld = try decoder.decode(Session.self, from: Data(#"{"id":"ses_old","title":"Old but active","location":{"directory":"/workspace"},"time":{"created":1,"updated":900,"viewed":1}}"#.utf8))
+        let newQuiet = try decoder.decode(Session.self, from: Data(#"{"id":"ses_new","title":"New but quiet","location":{"directory":"/workspace"},"time":{"created":500,"updated":500,"viewed":9999}}"#.utf8))
+        let tie = try decoder.decode(Session.self, from: Data(#"{"id":"ses_z","location":{"directory":"/workspace"},"time":{"created":0,"updated":900}}"#.utf8))
+        precondition(SessionActivityOrder.sorted([newQuiet, activeOld, tie]).map(\.id) == ["ses_z", "ses_old", "ses_new"])
+        let refreshedOld = try decoder.decode(Session.self, from: Data(#"{"id":"ses_old","title":"Fresh metadata","location":{"directory":"/workspace"},"time":{"created":1,"updated":1000}}"#.utf8))
+        let mergedSessions = SessionActivityOrder.merge(existing: [newQuiet, activeOld, tie], incoming: [refreshedOld, newQuiet])
+        precondition(mergedSessions.count == 3 && mergedSessions.first?.id == "ses_old" && mergedSessions.first?.title == "Fresh metadata")
+        print("PASS: server activity order ignores creation/viewed, matches ID tie-break and replaces stale paginated metadata")
         precondition(MessageBlock.parse("```swift\nprint(1)\n```") == [.code("swift", "print(1)")])
         precondition(MessageBlock.parse("```\nunfinished") == [.code("", "unfinished")])
         precondition(MessageBlock.parse("| A | B |\n| --- | --- |\n| 1 | 2 |") == [.table([["A", "B"], ["1", "2"]])])

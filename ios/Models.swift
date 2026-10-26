@@ -1,5 +1,23 @@
 import Foundation
 
+/// Mirrors Core SessionStore: time_updated DESC, id DESC.
+/// Never uses local read/open timestamps or server time.viewed.
+enum SessionActivityOrder {
+    static func sorted(_ sessions: [Session]) -> [Session] {
+        sessions.sorted { lhs, rhs in
+            let a = lhs.time?.updated ?? lhs.time?.created ?? 0
+            let b = rhs.time?.updated ?? rhs.time?.created ?? 0
+            return a == b ? lhs.id > rhs.id : a > b
+        }
+    }
+    static func merge(existing: [Session], incoming: [Session]) -> [Session] {
+        var records = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        // Incoming is fresh server metadata even if this ID was loaded earlier.
+        for session in incoming { records[session.id] = session }
+        return sorted(Array(records.values))
+    }
+}
+
 enum InboxAdmission {
     static func allows(connected: Bool, enabledServer: String, currentServer: String, admittedServer: String, paused: Bool, cancelled: Bool) -> Bool {
         connected && !paused && !cancelled && !admittedServer.isEmpty && enabledServer == admittedServer && currentServer == admittedServer

@@ -145,7 +145,7 @@ struct SessionsView: View {
     @State private var cachedList = false
     var searching: Bool { !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var displayedSessions: [Session] {
-        (searching ? searchResults : sessions).filter { session in
+        SessionActivityOrder.sorted(searching ? searchResults : sessions).filter { session in
             switch listFilter {
             case "Não lidas": return unread.isUnread(session, server: api.server)
             case "Em execução": return session.outcome == nil && session.time?.idle == nil
@@ -279,15 +279,17 @@ struct SessionsView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
         let ticket = UUID()
+        let server = api.server
+        let connection = api.connectionID
         searchTicket = ticket
         searchBusy = true
         defer { if searchTicket == ticket { searchBusy = false } }
         do {
             let page: Page<Session> = try await api.request(SessionSearch.path(query: query, cursor: more ? searchCursor : nil))
             try Task.checkCancellation()
-            guard searchTicket == ticket, query == searchText.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
-            if more { searchResults += page.data.filter { item in !searchResults.contains { $0.id == item.id } } }
-            else { searchResults = page.data }
+            guard searchTicket == ticket, api.connected, api.server == server, api.connectionID == connection,
+                  query == searchText.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+            searchResults = SessionActivityOrder.merge(existing: more ? searchResults : [], incoming: page.data)
             searchCursor = page.cursor?.next
             searchError = nil
         } catch {
@@ -297,6 +299,8 @@ struct SessionsView: View {
     }
     func load(more: Bool = false, resetPagination: Bool = false) async {
         guard !busy else { return }
+        let server = api.server
+        let connection = api.connectionID
         busy = true
         defer { busy = false }
         do {
@@ -304,10 +308,11 @@ struct SessionsView: View {
             var url = "/api/session?limit=30&archived=false&parentID=null"
             if more, let cursor { url += "&cursor=" + API.escape(cursor) } else { url += "&order=desc" }
             let page: Page<Session> = try await api.request(url)
+            guard api.connected, api.server == server, api.connectionID == connection else { return }
             unread.initialize(server: api.server, sessions: page.data)
             PocketNotifications.shared.observe(page.data, server: api.server)
             if more {
-                sessions += page.data.filter { s in !sessions.contains(where: { $0.id == s.id }) }
+                sessions = SessionActivityOrder.merge(existing: sessions, incoming: page.data)
                 loadedMore = true
             }
             else {
@@ -334,7 +339,8 @@ struct SessionsView: View {
                         }
                     } else if let cached { loaded.append(cached) }
                 }
-                sessions = loaded
+                guard api.connected, api.server == server, api.connectionID == connection else { return }
+                sessions = SessionActivityOrder.sorted(loaded)
                 if refreshedPins { pinsChecked = Date() }
                 pinLoadFailed = failed
             }
