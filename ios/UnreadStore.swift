@@ -11,9 +11,19 @@ import Combine
     }
     func isUnread(_ session: Session, server: String) -> Bool { state.isUnread(session, server: server) }
     func initialize(server: String, sessions: [Session]) {
-        guard state.baselines[server] == nil else { return }
+        let previous = state
         state.initialize(server: server, sessions: sessions)
-        save()
+        let markers = sessions.compactMap { session -> (String, Double)? in
+            guard let stamp = session.time?.viewed else { return nil }
+            return (session.id, stamp)
+        }
+        state.synchronize(server: server, markers: Dictionary(markers, uniquingKeysWith: { max($0, $1) }))
+        if previous.baselines != state.baselines || previous.viewed != state.viewed { save() }
+    }
+    func synchronize(server: String, markers: [String: Double]) {
+        let previous = state.viewed
+        state.synchronize(server: server, markers: markers)
+        if previous != state.viewed { save() }
     }
     func markRead(_ session: Session, server: String) {
         guard state.isUnread(session, server: server) else { return }

@@ -21,6 +21,7 @@ from events import session_hint
 from devices import DeviceTokens
 from chat_search import search_page
 from power import NotebookPower
+from read_markers import read_markers
 from resume import ResumableInbox
 from inbox import PhoneInbox
 from storage import storage_status
@@ -35,14 +36,15 @@ CORE_ENDPOINT = None
 CORE_CHECKED_AT = 0
 STREAM_SLOTS = threading.BoundedSemaphore(8)
 SEARCH_SLOTS = threading.BoundedSemaphore(2)
+READ_MARKER_SLOTS = threading.BoundedSemaphore(2)
 RULES = {
-    'GET': [r'/api/info', r'/api/session', r'/api/session/ses[^/]+',
+    'GET': [r'/api/info', r'/api/session', r'/api/session/active', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
             r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices', r'/phone/power/status',
             r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)'],
     'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
-             r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)'],
+             r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)', r'/phone/session/read-state'],
     'PATCH': [r'/api/session/ses[^/]+'],
 }
 
@@ -250,6 +252,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(400, {'error': 'Invalid path'})
             length = int(self.headers.get('Content-Length', '0'))
             maximum = self.server.files.max_bytes if path in ('/phone/files/upload', '/phone/inbox/upload') else MAX_BODY
+            if path == '/phone/session/read-state': maximum = 16384
             if length < 0 or (path != '/phone/inbox/upload' and length > maximum) or self.headers.get('Transfer-Encoding'):
                 return self.reply(413, {'error': 'Request too large'})
             self.connection.settimeout(10)
@@ -364,6 +367,14 @@ class Handler(BaseHTTPRequestHandler):
                         self.headers.get('X-Upload-ID', ''), self.headers.get('X-Content-SHA256', ''), expected)
                     return self.reply(200, result)
             body = self.rfile.read(length) if length else None
+            if path == '/phone/session/read-state':
+                if not READ_MARKER_SLOTS.acquire(blocking=False):
+                    return self.reply(429, {'error': 'Consulta de leitura ocupada; aguarde próxima atualização.'})
+                try:
+                    payload = json.loads(body or b'{}')
+                    return self.reply(200, read_markers(payload.get('ids'), upstream))
+                finally:
+                    READ_MARKER_SLOTS.release()
             if path == '/phone/power/status':
                 return self.reply(200, self.server.power.status())
             if path == '/phone/power/prepare':

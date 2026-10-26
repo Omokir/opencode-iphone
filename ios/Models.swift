@@ -64,7 +64,7 @@ struct Session: Decodable, Identifiable, Hashable {
     let agent: String?
     let time: Time?
     let outcome: String?
-    struct Time: Decodable, Equatable { let created: Double; let updated: Double; let idle: Double? }
+    struct Time: Decodable, Equatable { let created: Double; let updated: Double; let idle: Double?; let viewed: Double? }
     var completionStamp: Double? {
         guard ["succeeded", "failed", "interrupted"].contains(outcome ?? "") else { return nil }
         return time?.idle
@@ -236,7 +236,15 @@ struct ReadState: Codable {
     }
     func isUnread(_ session: Session, server: String) -> Bool {
         guard let stamp = session.completionStamp, stamp > 0 else { return false }
-        return stamp > (viewed[server + "|" + session.id] ?? baselines[server] ?? 0)
+        let localThreshold = max(viewed[server + "|" + session.id] ?? 0, baselines[server] ?? 0)
+        let knownRead = max(localThreshold, session.time?.viewed ?? 0)
+        return stamp > knownRead
+    }
+    mutating func synchronize(server: String, markers: [String: Double]) {
+        for (id, stamp) in markers where stamp.isFinite && stamp > 0 {
+            let key = server + "|" + id
+            viewed[key] = max(viewed[key] ?? 0, stamp)
+        }
     }
     mutating func markRead(_ session: Session, server: String) {
         guard let stamp = session.completionStamp else { return }
@@ -244,6 +252,12 @@ struct ReadState: Codable {
         viewed[key] = max(viewed[key] ?? 0, stamp)
     }
 }
+struct ActiveSessions: Decodable {
+    let data: [String: State]
+    struct State: Decodable { let type: String }
+    var runningIDs: Set<String> { Set(data.filter { $0.value.type == "running" }.map(\.key)) }
+}
+struct SharedReadMarkers: Decodable { let viewed: [String: Double]; let unavailable: [String] }
 struct PinState: Codable {
     var conversations: [String: [String]] = [:]
     func ids(server: String) -> [String] { conversations[server] ?? [] }

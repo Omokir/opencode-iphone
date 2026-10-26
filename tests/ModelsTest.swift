@@ -4,6 +4,25 @@ import Foundation
 struct ModelsTest {
     static func main() throws {
         let decoder = JSONDecoder()
+        var sharedRead = ReadState()
+        sharedRead.baselines["shared-host"] = 10
+        let unreadDesktop = try decoder.decode(Session.self, from: Data(#"{"id":"ses_shared","location":{"directory":"/workspace"},"outcome":"succeeded","time":{"created":1,"updated":50,"idle":50,"viewed":20}}"#.utf8))
+        let readDesktop = try decoder.decode(Session.self, from: Data(#"{"id":"ses_shared","location":{"directory":"/workspace"},"outcome":"succeeded","time":{"created":1,"updated":50,"idle":50,"viewed":50}}"#.utf8))
+        precondition(sharedRead.isUnread(unreadDesktop, server: "shared-host"))
+        precondition(!sharedRead.isUnread(readDesktop, server: "shared-host"))
+        sharedRead.synchronize(server: "shared-host", markers: ["ses_shared": 50])
+        precondition(!sharedRead.isUnread(unreadDesktop, server: "shared-host"), "Batch read marker clears older cached DTO")
+        precondition(sharedRead.isUnread(unreadDesktop, server: "other-host"), "Read state remains per-server")
+        let nextCompletion = try decoder.decode(Session.self, from: Data(#"{"id":"ses_shared","location":{"directory":"/workspace"},"outcome":"succeeded","time":{"created":1,"updated":60,"idle":60,"viewed":50}}"#.utf8))
+        precondition(sharedRead.isUnread(nextCompletion, server: "shared-host"), "New completion after read is unread again")
+        sharedRead.baselines["new-host"] = 100
+        sharedRead.synchronize(server: "new-host", markers: ["ses_shared": 20])
+        precondition(!sharedRead.isUnread(unreadDesktop, server: "new-host"), "Old server viewed must not lower initial baseline")
+        let active = try decoder.decode(ActiveSessions.self, from: Data(#"{"data":{"ses_running":{"type":"running"},"ses_future":{"type":"unknown"}}}"#.utf8))
+        precondition(active.runningIDs == ["ses_running"])
+        let inactive = try decoder.decode(ActiveSessions.self, from: Data(#"{"data":{}}"#.utf8))
+        precondition(inactive.runningIDs.isEmpty)
+        print("PASS: desktop read synchronization, older-page marker merge, new completions and authoritative running-only state")
         let activeOld = try decoder.decode(Session.self, from: Data(#"{"id":"ses_old","title":"Old but active","location":{"directory":"/workspace"},"time":{"created":1,"updated":900,"viewed":1}}"#.utf8))
         let newQuiet = try decoder.decode(Session.self, from: Data(#"{"id":"ses_new","title":"New but quiet","location":{"directory":"/workspace"},"time":{"created":500,"updated":500,"viewed":9999}}"#.utf8))
         let tie = try decoder.decode(Session.self, from: Data(#"{"id":"ses_z","location":{"directory":"/workspace"},"time":{"created":0,"updated":900}}"#.utf8))

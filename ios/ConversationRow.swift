@@ -1,9 +1,12 @@
 import SwiftUI
 
 struct ConversationRow: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var phase
     let session: Session
     let pinned: Bool
     let unread: Bool
+    let running: Bool
     let togglePin: () -> Void
     var body: some View {
         NavigationLink(value: session) {
@@ -14,10 +17,14 @@ struct ConversationRow: View {
                 }.padding(.vertical, 5)
                 Spacer(minLength: 0)
                 if pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(Style.blue).accessibilityHidden(true) }
-                if unread { Circle().fill(Style.blue).frame(width: 9, height: 9).accessibilityHidden(true) }
+                if running {
+                    Image(systemName: "circle.fill").font(.system(size: 10)).foregroundStyle(.green)
+                        .symbolEffect(.pulse, isActive: !reduceMotion && phase == .active)
+                        .frame(width: 12, height: 12).accessibilityHidden(true)
+                } else if unread { Circle().fill(Style.blue).frame(width: 9, height: 9).accessibilityHidden(true) }
             }
         }
-        .accessibilityValue([pinned ? "Fixada" : nil, unread ? "Resposta não lida" : nil].compactMap { $0 }.joined(separator: ". "))
+        .accessibilityValue([pinned ? "Fixada" : nil, running ? "Em execução no notebook" : unread ? "Resposta não lida" : nil].compactMap { $0 }.joined(separator: ". "))
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button(pinned ? "Desafixar" : "Fixar", systemImage: pinned ? "pin.slash" : "pin", action: togglePin).tint(Style.blue)
         }

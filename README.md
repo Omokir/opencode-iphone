@@ -14,6 +14,8 @@ Latest improvements: [0.9.0 usage, task recovery, transfers, updates and power l
 
 History ordering: [0.9.1 shared notebook activity order and sync boundaries](docs/SESSION-ORDER.md).
 
+Conversation indicators: [0.9.2 shared computer reads and running status](docs/SESSION-INDICATORS.md).
+
 ## Included
 
 - Existing sessions, new sessions in a notebook directory, paged history.

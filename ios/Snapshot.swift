@@ -28,7 +28,8 @@ import SwiftUI
         let route = String(path.split(separator: "?")[0])
         var result: [String: Any] = [:]
         if method != "GET" {
-            if route == "/phone/control/start" { result = ["data": object] }
+            if route == "/phone/session/read-state" { result = ["viewed": [:], "unavailable": []] }
+            else if route == "/phone/control/start" { result = ["data": object] }
             else if route == "/phone/control/stop" { result = ["enabled": false, "warnings": []] }
             else if route.hasSuffix("/agent") { object["agent"] = body?["agent"] }
             else if route.hasSuffix("/model") { object["model"] = body?["model"] }
@@ -55,6 +56,7 @@ import SwiftUI
                       "accountLabel": "u***@example.invalid", "plan": "plus", "weekly": ["usedPercent": 36, "windowMinutes": 10080, "resetsAt": Date().timeIntervalSince1970 + 172800]]
         }
         else if route == "/phone/status" { result = ["awake": true, "battery": ["available": true, "percentage": 46, "charging": true, "onAC": true, "state": "Charging"]] }
+        else if route == "/api/session/active" { result = ["data": [:]] }
         else if route == "/api/session" {
             let query = URLComponents(string: "https://fixture.invalid" + path)?.queryItems?.first { $0.name == "search" }?.value ?? ""
             if query.isEmpty { result = ["data": [object]] }

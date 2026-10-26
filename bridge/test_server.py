@@ -62,6 +62,23 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(self.request('/phone/power/prepare', 'test-token', method='POST')[0], 403)
         self.assertEqual(self.request('/phone/power/off', 'test-token', {'ticket': 'not-issued'})[0], 409)
 
+    def test_active_state_is_authenticated_read_only_proxy(self):
+        self.assertEqual(self.request('/api/session/active')[0], 401)
+        with patch.object(server, 'upstream', return_value=(200, b'{"data":{"ses_running":{"type":"running"}}}')) as upstream:
+            status, result = self.request('/api/session/active', 'test-token')
+            self.assertEqual(status, 200)
+            self.assertEqual(result['data']['ses_running']['type'], 'running')
+            upstream.assert_called_once_with('GET', '/api/session/active', None)
+
+    def test_shared_read_markers_project_only_viewed_and_reject_paths(self):
+        self.assertEqual(self.request('/phone/session/read-state', body={'ids': ['ses_old']})[0], 401)
+        with patch.object(server, 'upstream', return_value=(200, b'{"data":{"id":"ses_old","title":"private","time":{"viewed":50}}}')) as upstream:
+            self.assertEqual(self.request('/phone/session/read-state', 'test-token', {'ids': ['ses_old']}), (200, {'viewed': {'ses_old': 50}, 'unavailable': []}))
+            upstream.assert_called_once_with('GET', '/api/session/ses_old', None)
+        with patch.object(server, 'upstream') as upstream:
+            self.assertEqual(self.request('/phone/session/read-state', 'test-token', {'ids': ['ses_old/../../config']})[0], 400)
+            upstream.assert_not_called()
+
     def test_no_config_or_shell_or_credentials(self):
         for path in ['/api/config', '/api/credential', '/api/shell', '/api/fs/read/private']:
             self.assertEqual(self.request(path, 'test-token')[0], 403)

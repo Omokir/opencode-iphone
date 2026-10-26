@@ -104,7 +104,7 @@ struct ConnectView: View {
     }
 }
 
-struct SessionsView: View {
+@MainActor struct SessionsView: View {
     @EnvironmentObject var api: API
     @EnvironmentObject var unread: UnreadStore
     @EnvironmentObject var pins: PinStore
@@ -143,12 +143,17 @@ struct SessionsView: View {
     @State private var dashboardExpanded = false
     @State private var listFilter = "Todas"
     @State private var cachedList = false
+    @State private var runningIDs = Set<String>()
+    @State private var activeUnavailable = false
+    @State private var activeGeneration = UUID()
+    @State private var activeExpiry: Task<Void, Never>?
+    @State private var markerOffset = 0
     var searching: Bool { !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var displayedSessions: [Session] {
         SessionActivityOrder.sorted(searching ? searchResults : sessions).filter { session in
             switch listFilter {
             case "Não lidas": return unread.isUnread(session, server: api.server)
-            case "Em execução": return session.outcome == nil && session.time?.idle == nil
+            case "Em execução": return runningIDs.contains(session.id)
             default: return true
             }
         }
@@ -175,6 +180,7 @@ struct SessionsView: View {
                         Text("Não lidas").tag("Não lidas")
                         Text("Em execução").tag("Em execução")
                     }.pickerStyle(.segmented)
+                    if activeUnavailable { Text("Estado de execução não confirmado. Verde não será mostrado até próxima consulta válida.").font(.caption).foregroundStyle(.secondary) }
                 }
                 if !displayedPins.isEmpty {
                     Section("Fixadas") {
@@ -256,6 +262,9 @@ struct SessionsView: View {
                 }
             }
             .onChange(of: path.count) { _, count in if count == 0 { Task { await load() } } }
+            .onChange(of: phase) { _, value in
+                if value != .active { activeGeneration = UUID(); activeExpiry?.cancel(); runningIDs = []; activeUnavailable = true }
+            }
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $projectPicker) { ProjectsView { session in sessions.insert(session, at: 0); path.append(session) } }
             .sheet(isPresented: $taskHistory) { NavigationStack { TaskHistoryView().toolbar { Button("Fechar") { taskHistory = false } } } }
@@ -271,9 +280,41 @@ struct SessionsView: View {
         }
     }
     func row(_ session: Session, pinned: Bool) -> some View {
-        ConversationRow(session: session, pinned: pinned, unread: unread.isUnread(session, server: api.server)) {
+        ConversationRow(session: session, pinned: pinned, unread: unread.isUnread(session, server: api.server), running: phase == .active && api.reachable != false && runningIDs.contains(session.id)) {
             pins.toggle(session.id, server: api.server)
         }
+    }
+    func refreshActive(enabled: Bool) async {
+        guard enabled else { return }
+        let server = api.server; let connection = api.connectionID
+        let generation = UUID(); activeGeneration = generation
+        do {
+            let state: ActiveSessions = try await api.request("/api/session/active")
+            guard activeGeneration == generation, api.connected, api.server == server, api.connectionID == connection, phase == .active, !Task.isCancelled else { return }
+            runningIDs = state.runningIDs; activeUnavailable = false
+            activeExpiry?.cancel()
+            activeExpiry = Task {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                guard !Task.isCancelled else { return }
+                runningIDs = []; activeUnavailable = true
+            }
+        } catch {
+            guard activeGeneration == generation else { return }
+            activeExpiry?.cancel(); runningIDs = []; activeUnavailable = true
+        }
+    }
+    func refreshOlderReads(excluding freshIDs: Set<String>) async {
+        let ids = SessionActivityOrder.sorted(sessions).map(\.id).filter { !freshIDs.contains($0) }
+        guard !ids.isEmpty else { return }
+        if markerOffset >= ids.count { markerOffset = 0 }
+        let batch = Array(ids.dropFirst(markerOffset).prefix(120))
+        markerOffset = (markerOffset + batch.count) % ids.count
+        let server = api.server; let connection = api.connectionID
+        do {
+            let result: SharedReadMarkers = try await api.request("/phone/session/read-state", method: "POST", body: ["ids": batch])
+            guard api.connected, api.server == server, api.connectionID == connection, !Task.isCancelled else { return }
+            unread.synchronize(server: server, markers: result.viewed)
+        } catch { /* Unknown markers never clear unread or authorize any action. */ }
     }
     func search(more: Bool = false) async {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -303,6 +344,7 @@ struct SessionsView: View {
         let connection = api.connectionID
         busy = true
         defer { busy = false }
+        async let activity: Void = refreshActive(enabled: !more)
         do {
             if resetPagination { loadedMore = false }
             var url = "/api/session?limit=30&archived=false&parentID=null"
@@ -345,6 +387,7 @@ struct SessionsView: View {
                 pinLoadFailed = failed
             }
             if more || !loadedMore { cursor = page.cursor?.next }
+            await refreshOlderReads(excluding: Set(page.data.map(\.id)))
             error = nil
             cachedList = false
             do {
@@ -353,6 +396,7 @@ struct SessionsView: View {
                 hostStatusFailed = false
             } catch { hostStatusFailed = true }
         } catch { self.error = ConnectionAdvice.describe(error) }
+        await activity
     }
     func newSession() async {
         guard directory.hasPrefix("/") else { error = "Use pasta com caminho absoluto, começando por /."; return }

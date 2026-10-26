@@ -41,6 +41,7 @@ import SwiftUI
         guard enabled else { return }
         for session in sessions {
             guard let raw = session.completionStamp else { continue }
+            guard (session.time?.viewed ?? 0) < raw else { continue }
             let timestamp = raw > 100_000_000_000 ? raw / 1000 : raw
             guard timestamp > enabledAt else { continue }
             post(key: "completion|\(server)|\(session.id)|\(raw)", title: "Tarefa finalizada", body: "Abra Pocket para consultar resultado no notebook.")
