@@ -38,11 +38,11 @@ STREAM_SLOTS = threading.BoundedSemaphore(8)
 SEARCH_SLOTS = threading.BoundedSemaphore(2)
 READ_MARKER_SLOTS = threading.BoundedSemaphore(2)
 RULES = {
-    'GET': [r'/api/info', r'/api/session', r'/api/session/active', r'/api/session/ses[^/]+',
+    'GET': [r'/api/info', r'/api/experimental/voice/models', r'/api/session', r'/api/session/active', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
             r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices', r'/phone/power/status',
             r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)'],
-    'POST': [r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
+    'POST': [r'/api/experimental/voice/session', r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
              r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)', r'/phone/session/read-state'],
     'PATCH': [r'/api/session/ses[^/]+'],
@@ -253,6 +253,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', '0'))
             maximum = self.server.files.max_bytes if path in ('/phone/files/upload', '/phone/inbox/upload') else MAX_BODY
             if path == '/phone/session/read-state': maximum = 16384
+            if path == '/api/experimental/voice/session': maximum = 256 * 1024
             if length < 0 or (path != '/phone/inbox/upload' and length > maximum) or self.headers.get('Transfer-Encoding'):
                 return self.reply(413, {'error': 'Request too large'})
             self.connection.settimeout(10)
@@ -367,6 +368,13 @@ class Handler(BaseHTTPRequestHandler):
                         self.headers.get('X-Upload-ID', ''), self.headers.get('X-Content-SHA256', ''), expected)
                     return self.reply(200, result)
             body = self.rfile.read(length) if length else None
+            if path == '/api/experimental/voice/session':
+                payload = json.loads(body or b'{}')
+                media = payload.get('transport', {})
+                if (length > 256 * 1024 or payload.get('model') != 'gpt-realtime-2.1' or
+                        not isinstance(media, dict) or media.get('type') != 'webrtc' or
+                        not isinstance(media.get('sdp'), str) or not media['sdp'].startswith('v=0')):
+                    return self.reply(400, {'error': 'Invalid Realtime WebRTC request'})
             if path == '/phone/session/read-state':
                 if not READ_MARKER_SLOTS.acquire(blocking=False):
                     return self.reply(429, {'error': 'Consulta de leitura ocupada; aguarde próxima atualização.'})

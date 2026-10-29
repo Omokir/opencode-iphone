@@ -2,11 +2,6 @@ import Foundation
 import AVFoundation
 import Combine
 
-private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) { completionHandler(nil) }
-}
-
 @MainActor final class RealtimeVoiceStore: ObservableObject {
     @Published private(set) var active = false
     @Published private(set) var connecting = false
@@ -28,12 +23,8 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
     private var beganAt: ContinuousClock.Instant?
     private var runningRequestID: String?
     private var generation = UUID()
-    private var transport: URLSession?
-    private var socket: URLSessionWebSocketTask?
-    private var audio: VoiceAudio?
-    private var input: AsyncStream<(Data, UInt64)>.Continuation?
+    private var rtc: VoiceWebRTC?
     private var receiveTask: Task<Void, Never>?
-    private var inputTask: Task<Void, Never>?
     private var followTask: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
     private var jobTask: Task<Void, Never>?
@@ -42,6 +33,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
     private var responseID: String?
     private var responding = false
     private var speaking = false
+    private var remotePlaying = false
     private var followNeeded = false
     private var boundServer = ""
     private var boundConnectionID: UUID?
@@ -57,56 +49,63 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
         usage = VoiceUsageLedger(); usageText = "Nenhum uso reportado pela API."; elapsedSeconds = 0
         maximumSeconds = VoiceBudget.minutes(UserDefaults.standard.integer(forKey: "voice.minutes")) * 60
         beganAt = nil; microphoneLevel = 0
+        remotePlaying = false
+        deadline = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(40)) } catch { return }
+            guard let self, self.generation == token, self.connecting else { return }
+            self.fail("Inicialização WebRTC expirou. Não houve nova tentativa automática; uma criação já enviada pode ter sido aceita pelo provedor.")
+        }
         do {
-            guard let key = VoiceKey.read() else { throw PhoneError.message("Configure chave OpenAI em Ajustes → Voz.") }
             let allowed = await withCheckedContinuation { continuation in AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) } }
             guard generation == token, connecting, !Task.isCancelled else { return }
             guard allowed else { throw PhoneError.message("Microfone não autorizado. Altere permissão nos Ajustes do iOS.") }
             guard api.connected, api.connectionID == boundConnectionID else { throw PhoneError.message("Pareie notebook antes de iniciar chamada com ferramentas.") }
-            let model = UserDefaults.standard.string(forKey: "voice.model") ?? "gpt-realtime"
+            let model = "gpt-realtime-2.1"
             let voice = UserDefaults.standard.string(forKey: "voice.voice") ?? "marin"
             guard RealtimeProtocol.models.contains(model), ["marin", "cedar"].contains(voice) else { throw PhoneError.message("Selecione modelo e voz válidos nos ajustes.") }
-            let config = URLSessionConfiguration.ephemeral
-            config.urlCache = nil; config.httpCookieStorage = nil; config.urlCredentialStorage = nil
-            config.timeoutIntervalForRequest = 20; config.timeoutIntervalForResource = 15 * 60
-            let network = URLSession(configuration: config, delegate: VoiceTransportPolicy(), delegateQueue: nil)
-            transport = network
-            status = "Criando sessão Realtime…"
-            var request = URLRequest(url: URL(string: "https://api.openai.com/v1/realtime/client_secrets")!)
-            request.httpMethod = "POST"; request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            let configuration = RealtimeProtocol.configuration(model: model, voice: voice, outputTokens: VoiceBudget.outputTokens(UserDefaults.standard.integer(forKey: "voice.outputTokens")))
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["expires_after": ["anchor": "created_at", "seconds": 60], "session": configuration])
-            let (bytes, response) = try await network.bytes(for: request)
-            guard generation == token, connecting else { return }
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            guard code == 200 else {
-                throw PhoneError.message(code == 401 ? "Chave OpenAI recusada." : code == 429 ? "API atingiu cota ou limite. Confira faturamento; não houve tentativa automática." : "API recusou sessão (HTTP \(code)). Confira modelo, permissões e faturamento.")
-            }
-            var data = Data()
-            for try await byte in bytes { guard data.count < 256 * 1024 else { throw PhoneError.message("Resposta de sessão excedeu limite.") }; data.append(byte) }
-            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any], let secret = object["value"] as? String, secret.hasPrefix("ek_"), secret.count < 1024 else { throw PhoneError.message("API não retornou credencial temporária válida.") }
+            let catalog: VoiceBrokerModels = try await api.request("/api/experimental/voice/models")
+            guard catalog.data.models.contains(where: { $0.model == model && $0.available && $0.transports.contains("webrtc") }) else { throw PhoneError.message("Realtime WebRTC indisponível no notebook. Configure credencial OpenAI no OpenCode.") }
             guard generation == token, connecting, api.server == boundServer, api.connectionID == boundConnectionID else { return }
-            var wsRequest = URLRequest(url: URL(string: "wss://api.openai.com/v1/realtime?model=" + API.escape(model))!)
-            wsRequest.setValue("Bearer " + secret, forHTTPHeaderField: "Authorization")
-            let ws = network.webSocketTask(with: wsRequest); ws.maximumMessageSize = 512 * 1024; socket = ws; ws.resume()
+            let media = VoiceWebRTC(); rtc = media
+            let configuration = RealtimeProtocol.configuration(model: model, voice: voice, outputTokens: VoiceBudget.outputTokens(UserDefaults.standard.integer(forKey: "voice.outputTokens")))
+            let stream = AsyncStream<Data>(bufferingPolicy: .bufferingNewest(128)) { continuation in
+                media.onEvent = { data in
+                    if case .dropped = continuation.yield(data) { continuation.finish() }
+                }
+                media.onFailure = { continuation.finish() }
+            }
+            media.onReady = { [weak self] in Task { @MainActor in
+                guard let self, self.generation == token, self.open else { return }
+                self.status = "Canal WebRTC aberto · aguardando sessão"
+            } }
+            status = "Preparando WebRTC…"
+            let offer = try await media.offer()
+            guard generation == token, connecting, api.server == boundServer, api.connectionID == boundConnectionID else { return }
+            status = "Criando sessão pelo notebook…"
+            let answer: VoiceBrokerSession = try await api.request("/api/experimental/voice/session", method: "POST", body: ["model": model, "session": configuration, "transport": ["type": "webrtc", "sdp": offer]])
+            guard generation == token, connecting, api.server == boundServer, api.connectionID == boundConnectionID else { return }
+            guard answer.data.transport.type == "webrtc" else { throw PhoneError.message("Notebook retornou transporte inesperado.") }
+            try await media.answer(answer.data.transport.sdp)
             beganAt = ContinuousClock().now
-            status = "Conectando áudio…"
+            status = "Conectando mídia WebRTC…"
             receiveTask = Task { [weak self] in
                 guard let self else { return }
                 do {
-                    while self.generation == token && self.open && !Task.isCancelled {
-                        let packet = try await ws.receive()
-                        let raw: Data
-                        switch packet { case .string(let text): raw = Data(text.utf8); case .data(let value): raw = value; @unknown default: continue }
+                    for await raw in stream {
+                        guard self.generation == token, self.open, !Task.isCancelled else { return }
                         guard raw.count <= 512 * 1024, let event = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else { throw PhoneError.message("Evento Realtime inválido.") }
                         try await self.handle(event, configuration: configuration, api: api, session: session, monitor: monitor, token: token)
                     }
+                    if self.generation == token && self.open { self.fail("Canal WebRTC interrompido. Nenhuma tarefa será reenviada.") }
                 } catch { if self.generation == token && self.open { self.fail(error is PhoneError ? error.localizedDescription : "Conexão ou circuito de voz interrompido. Consulte diagnóstico; nada será reenviado automaticamente.") } }
             }
+            deadline?.cancel()
             deadline = Task { [weak self] in
                 guard let self else { return }
-                do { try await Task.sleep(for: .seconds(self.maximumSeconds)) } catch { return }
+                do { try await Task.sleep(for: .seconds(20)) } catch { return }
+                guard self.generation == token else { return }
+                if self.connecting { self.fail("Canal de eventos WebRTC não confirmou sessão. Reinício somente manual."); return }
+                do { try await Task.sleep(for: .seconds(max(1, self.maximumSeconds - 20))) } catch { return }
                 guard self.generation == token else { return }
                 self.end(reason: "Limite de tempo atingido. Nova chamada paga exige tocar Ligar novamente.")
             }
@@ -114,7 +113,7 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
                 while !Task.isCancelled {
                     guard let self, self.generation == token, self.open else { return }
                     self.refreshDiagnostics()
-                    if self.followNeeded && self.active && !self.responding && !self.speaking && self.audio?.hasPendingAudio != true {
+                    if self.followNeeded && self.active && !self.responding && !self.speaking && !self.remotePlaying {
                         self.followNeeded = false; self.responding = true
                         do { try await self.emit(["type": "response.create"], token: token) }
                         catch { if self.generation == token { self.fail("Não foi possível continuar resposta de voz.") }; return }
@@ -127,34 +126,20 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
         }
     }
     private func emit(_ event: [String: Any], token: UUID) async throws {
-        guard generation == token, open, let socket else { throw CancellationError() }
+        guard generation == token, open, let rtc else { throw CancellationError() }
         let data = try JSONSerialization.data(withJSONObject: event)
-        guard let value = String(data: data, encoding: .utf8) else { throw CancellationError() }
-        try await socket.send(.string(value))
+        try rtc.send(data)
     }
     private func handle(_ event: [String: Any], configuration: [String: Any], api: API, session: Session, monitor: ChatStore, token: UUID) async throws {
         guard generation == token, open else { return }
         switch event["type"] as? String {
-        case "session.created": try await emit(["type": "session.update", "session": configuration], token: token)
+        case "session.created":
+            // Broker already supplied configuration. No second session update.
+            fallthrough
         case "session.updated":
             guard !active else { return }
-            let io = VoiceAudio(); audio = io
-            let stream = AsyncStream<(Data, UInt64)>(bufferingPolicy: .bufferingNewest(8)) { input = $0 }
-            let continuation = input!
-            try io.start { [weak self] data, epoch in
-                if case .dropped = continuation.yield((data, epoch)) { Task { @MainActor in if self?.generation == token { self?.fail("Rede não acompanhou microfone. Chamada encerrada em vez de acumular áudio.") } } }
-            }
-            active = true; connecting = false; status = "Ouvindo · Realtime"
-            inputTask = Task { [weak self] in
-                do {
-                    for await (data, epoch) in stream {
-                        guard let self, self.generation == token, self.active else { return }
-                        if self.muted || !io.current(epoch) { continue }
-                        try await self.emit(["type": "input_audio_buffer.append", "audio": data.base64EncodedString()], token: token)
-                        if self.generation == token { self.diagnostics.sentPackets += 1 }
-                    }
-                } catch { if self?.generation == token { self?.fail("Envio do microfone interrompido.") } }
-            }
+            rtc?.mute(muted)
+            active = true; connecting = false; status = "Sessão pronta · áudio WebRTC ainda não confirmado"
             followNeeded = true
         case "input_audio_buffer.speech_started":
             diagnostics.speechStarts += 1
@@ -162,19 +147,17 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
             if let pending { self.pending = nil; try await toolResult(pending.id, result: ["status": "cancelled", "message": "Nova fala antes de confirmação visual; proposta não enviada."], token: token) }
             try await interrupt(token: token)
         case "input_audio_buffer.speech_stopped": speaking = false; status = "Respondendo…"
+        case "output_audio_buffer.started":
+            remotePlaying = true
+            responseAudioPackets += 1
+            diagnostics.receivedAudio += 1
+            status = "Servidor iniciou áudio · confirme som no aparelho"
+        case "output_audio_buffer.stopped", "output_audio_buffer.cleared":
+            remotePlaying = false
+            status = "Ouvindo · WebRTC"
         case "response.created":
             responseAudioPackets = 0
             responding = true; responseID = (event["response"] as? [String: Any])?["id"] as? String
-        case "response.output_audio.delta":
-            diagnostics.receivedAudio += 1
-            guard let response = event["response_id"] as? String else { diagnostics.malformedAudio += 1; return }
-            if ignoredResponses.contains(response) { diagnostics.ignoredAudio += 1; return }
-            guard
-                  let item = event["item_id"] as? String, let text = event["delta"] as? String,
-                  let data = Data(base64Encoded: text), !data.isEmpty, let audio else { diagnostics.malformedAudio += 1; return }
-            responseAudioPackets += 1
-            try audio.enqueue(data, item: item)
-            diagnostics.scheduledAudio += 1
         case "response.output_audio_transcript.delta":
             diagnostics.transcripts += 1
             if let id = event["response_id"] as? String, ignoredResponses.contains(id) { return }
@@ -294,36 +277,32 @@ private final class VoiceTransportPolicy: NSObject, URLSessionTaskDelegate, @unc
         notebook = "Proposta negada; nada enviado"
     }
     func setMuted(_ value: Bool) {
-        muted = value; audio?.setMuted(value)
-        if value { let token = generation; Task { try? await emit(["type": "input_audio_buffer.clear"], token: token) } }
+        muted = value; rtc?.mute(value)
     }
     func stopSpeaking() { let token = generation; Task { try? await interrupt(token: token) } }
     private func interrupt(token: UUID) async throws {
         if let id = responseID { ignoredResponses.insert(id) }
         if ignoredResponses.count > 64 { fail("Limite de interrupções atingido; inicie nova chamada."); return }
-        let cuts = audio?.interrupt() ?? []
         if responding, let responseID { try await emit(["type": "response.cancel", "response_id": responseID], token: token) }
-        for (item, milliseconds) in cuts { try await emit(["type": "conversation.item.truncate", "item_id": item, "content_index": 0, "audio_end_ms": milliseconds], token: token) }
+        try await emit(["type": "output_audio_buffer.clear"], token: token)
     }
     private func fail(_ message: String) { end(); error = message }
     private func refreshDiagnostics() {
-        diagnosticsText = diagnostics.text + (audio.map { "\n" + $0.diagnostics } ?? "")
-        microphoneLevel = muted ? 0 : (audio?.level ?? 0)
-        if let audio { route = audio.routeLabel }
+        diagnosticsText = "Transporte: WebRTC nativo · credencial no notebook\n" + diagnostics.text
+        microphoneLevel = 0
+        route = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portName).joined(separator: ", ")
         if let beganAt { elapsedSeconds = max(0, Int(beganAt.duration(to: ContinuousClock().now).components.seconds)) }
     }
-    func useSpeaker() { do { try audio?.useSpeaker() } catch { self.error = "Não foi possível mudar saída. Use seletor de áudio do iOS; fones não são removidos automaticamente." } }
+    func useSpeaker() { do { try rtc?.speaker() } catch { self.error = "Não foi possível mudar saída. Use seletor de áudio do iOS." } }
     func end(reason: String = "Chamada encerrada. Tarefas no notebook não foram canceladas.") {
         refreshDiagnostics()
         if let runningRequestID { TaskHistory.shared.set(runningRequestID, server: boundServer, state: "uncertain") }
         runningRequestID = nil; beganAt = nil; microphoneLevel = 0
         generation = UUID(); active = false; connecting = false
-        receiveTask?.cancel(); inputTask?.cancel(); followTask?.cancel(); deadline?.cancel(); jobTask?.cancel()
-        receiveTask = nil; inputTask = nil; followTask = nil; deadline = nil; jobTask = nil
-        input?.finish(); input = nil; audio?.stop(); audio = nil
-        socket?.cancel(with: .normalClosure, reason: nil); socket = nil
-        transport?.invalidateAndCancel(); transport = nil
+        receiveTask?.cancel(); followTask?.cancel(); deadline?.cancel(); jobTask?.cancel()
+        receiveTask = nil; followTask = nil; deadline = nil; jobTask = nil
+        rtc?.close(); rtc = nil
         pending = nil; caption = ""; responding = false; speaking = false; followNeeded = false; responseID = nil
-        status = reason
+        remotePlaying = false; status = reason
     }
 }

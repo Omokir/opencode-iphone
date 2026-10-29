@@ -8,7 +8,7 @@ struct VoiceSettingsView: View {
     @State private var saved = VoiceKey.read() != nil
     @State private var notice: String?
     @State private var deleting = false
-    @AppStorage("voice.model") private var model = "gpt-realtime"
+    @AppStorage("voice.model") private var model = "gpt-realtime-2.1"
     @AppStorage("voice.voice") private var voice = "marin"
     @AppStorage("voice.minutes") private var minutes = 5
     @AppStorage("voice.outputTokens") private var outputTokens = 512
@@ -16,22 +16,15 @@ struct VoiceSettingsView: View {
         Form {
             Section("OpenAI Realtime") {
                 Text("Realtime conversa diretamente por voz e usa OpenCode como ferramenta. Execução continua no login/modelo já configurado no notebook.").font(.caption)
-                Picker("Modelo de voz", selection: $model) { ForEach(RealtimeProtocol.models, id: \.self) { Text($0).tag($0) } }
+                Text("Modelo: gpt-realtime-2.1 · WebRTC nativo")
                 Picker("Voz", selection: $voice) { Text("Marin").tag("marin"); Text("Cedar").tag("cedar") }
                 Text("Disponibilidade depende da conta API. Não há troca automática de modelo nem fallback pago.").font(.caption).foregroundStyle(.secondary)
             }
-            Section("Chave API") {
-                Label(saved ? "Chave salva no Chaves deste iPhone" : "Nenhuma chave salva", systemImage: saved ? "key.fill" : "key")
-                SecureField("Cole chave OpenAI (sk-…)", text: $key).textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
-                Button("Salvar chave") {
-                    Task {
-                        guard await privacy.confirm("Guardar chave de voz no Chaves do iPhone") else { return }
-                        do { try VoiceKey.save(key); key = ""; saved = true; notice = "Chave salva somente no Chaves. Nenhuma chamada iniciada." }
-                        catch { notice = error.localizedDescription }
-                    }
-                }.disabled(key.isEmpty)
+            Section("Credencial no notebook") {
+                Label("Gerenciada pelo OpenCode do notebook", systemImage: "key.fill")
+                Text("Celular envia oferta WebRTC pelo pareamento Tailscale e recebe resposta SDP. Chave permanente não sai do notebook. Login/modelo de programação permanecem separados.").font(.caption)
                 Button("Apagar chave", role: .destructive) { deleting = true }.disabled(!saved)
-                Text("Chave vai somente para api.openai.com ao criar credencial temporária da chamada. Nunca é enviada ao notebook, histórico, GitHub ou diagnóstico. Use chave de projeto com limite de gastos. Não cole aqui senha/login do ChatGPT.").font(.caption)
+                Text("Botão remove somente chave antiga deste iPhone, se existir. Ela não é usada pelo novo transporte. Use limite de gastos no projeto OpenAI do notebook.").font(.caption)
             }
             Section("Privacidade e cobrança") {
                 Stepper("Limite por chamada: \(VoiceBudget.minutes(minutes)) min", value: Binding(get: { VoiceBudget.minutes(minutes) }, set: { minutes = VoiceBudget.minutes($0) }), in: 1...15)
@@ -73,7 +66,7 @@ struct VoiceCallView: View {
                     Text("Voz: OpenAI Realtime · execução: OpenCode do notebook").font(.caption).foregroundStyle(.secondary)
                     if voice.open {
                         Text("\(voice.elapsedSeconds / 60):\(String(format: "%02d", voice.elapsedSeconds % 60)) / \(voice.maximumSeconds / 60):00").font(.system(.headline, design: .monospaced)).accessibilityLabel("Duração da chamada")
-                        ProgressView("Microfone", value: Double(voice.microphoneLevel), total: 1).accessibilityLabel(voice.muted ? "Microfone mudo" : "Nível do microfone")
+                        Text(voice.muted ? "Microfone mudo" : "Microfone via WebRTC · sem medidor PCM local").font(.caption)
                         Text(voice.route).font(.caption).foregroundStyle(.secondary)
                         HStack {
                             Button("Usar alto-falante") { voice.useSpeaker() }.disabled(!voice.active)
@@ -86,9 +79,9 @@ struct VoiceCallView: View {
                         NavigationLink("Revisar tarefas sem reenviar") { TaskHistoryView() }
                         Button("Ligar", systemImage: "phone.fill") { consent = true }.disabled(soundTest.running)
                         Button(soundTest.running ? "Testando circuito local…" : "Testar som local (sem API)", systemImage: "speaker.wave.2") { Task { await soundTest.run() } }.disabled(soundTest.running)
-                        Text("Teste emite tom curto e usa microfone apenas para configurar o mesmo circuito da chamada. Nada é enviado à rede. Aumente volume pelos botões do iPhone se necessário.").font(.caption).foregroundStyle(.secondary)
+                        Text("Teste local verifica saída do iOS, não comprova mídia WebRTC. Nada é enviado à rede. Aumente volume pelos botões do iPhone se necessário.").font(.caption).foregroundStyle(.secondary)
                         if !soundTest.result.isEmpty { Text(soundTest.result).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
-                        NavigationLink("Configurar voz e chave API") { VoiceSettingsView() }
+                        NavigationLink("Configurar voz") { VoiceSettingsView() }
                     }
                     if let error = voice.error { Text(error).font(.caption).foregroundStyle(.red) }
                 }
@@ -136,7 +129,7 @@ struct VoiceCallView: View {
                 }
                 .sheet(item: $question) { form in QuestionFormView(question: form, session: session) { Task { await monitor.refresh(api, session: session) } } }
                 .confirmationDialog("Iniciar chamada com API paga?", isPresented: $consent, titleVisibility: .visible) {
-                    Button("Ligar usando minha chave API") { Task { if await privacy.confirm("Iniciar conversa de voz com OpenAI Realtime"), !soundTest.running { await voice.start(api, session: session, monitor: monitor) } } }
+                    Button("Ligar via OpenCode do notebook") { Task { if await privacy.confirm("Iniciar conversa de voz com OpenAI Realtime"), !soundTest.running { await voice.start(api, session: session, monitor: monitor) } } }
                     Button("Cancelar", role: .cancel) { }
                 } message: { Text("Microfone será transmitido à OpenAI. Texto recente desta conversa pode ser compartilhado com Realtime por ferramenta. Cobrança separada; limite de \(VoiceBudget.minutes(UserDefaults.standard.integer(forKey: "voice.minutes"))) minutos, sem garantia de valor máximo. Não diga senhas/códigos. Nenhuma tarefa será enviada sem confirmação visual.") }
                 .alert("Interromper tarefa no notebook?", isPresented: $interruptTask) {

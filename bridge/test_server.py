@@ -70,6 +70,19 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(result['data']['ses_running']['type'], 'running')
             upstream.assert_called_once_with('GET', '/api/session/active', None)
 
+    def test_voice_broker_requires_auth_and_limits_transport(self):
+        self.assertEqual(self.request('/api/experimental/voice/models')[0], 401)
+        self.assertEqual(self.request('/api/experimental/voice/session', body={})[0], 401)
+        with patch.object(server, 'upstream') as upstream:
+            for payload in [{}, {'model': 'gpt-live-1', 'transport': {'type': 'webrtc', 'sdp': 'v=0\r\n'}},
+                            {'model': 'gpt-realtime-2.1', 'transport': {'type': 'websocket'}}]:
+                self.assertEqual(self.request('/api/experimental/voice/session', 'test-token', payload)[0], 400)
+            upstream.assert_not_called()
+        with patch.object(server, 'upstream', return_value=(200, b'{"data":{"transport":{"type":"webrtc","sdp":"v=0"}}}')) as upstream:
+            payload = {'model': 'gpt-realtime-2.1', 'session': {}, 'transport': {'type': 'webrtc', 'sdp': 'v=0\r\n'}}
+            self.assertEqual(self.request('/api/experimental/voice/session', 'test-token', payload)[0], 200)
+            self.assertEqual(upstream.call_count, 1)
+
     def test_shared_read_markers_project_only_viewed_and_reject_paths(self):
         self.assertEqual(self.request('/phone/session/read-state', body={'ids': ['ses_old']})[0], 401)
         with patch.object(server, 'upstream', return_value=(200, b'{"data":{"id":"ses_old","title":"private","time":{"viewed":50}}}')) as upstream:
