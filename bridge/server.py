@@ -43,11 +43,15 @@ RULES = {
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
             r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices', r'/phone/power/status',
              r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)',
-             r'/phone/kzl/(context|tasks|capabilities|memory|events)'],
+              r'/phone/kzl/(context|tasks|capabilities|memory|events)', r'/api/(command|skill)',
+              r'/api/session/ses[^/]+/inbox', r'/api/experimental/schedule'],
     'POST': [r'/api/experimental/voice/session', r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
               r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)', r'/phone/session/read-state',
-              r'/phone/kzl/(ensure|submit|turn)', r'/phone/kzl/task/job_[A-Za-z0-9_-]+/(cancel|update)'],
+               r'/phone/kzl/(ensure|submit|turn)', r'/phone/kzl/task/job_[A-Za-z0-9_-]+/(cancel|update)',
+               r'/api/session/ses[^/]+/command', r'/api/experimental/session/ses[^/]+/skill',
+               r'/api/experimental/schedule', r'/api/experimental/schedule/[^/]+/(pause|resume)'],
+    'DELETE': [r'/api/session/ses[^/]+/inbox/msg_[^/]+', r'/api/experimental/schedule/[^/]+'],
     'PATCH': [r'/api/session/ses[^/]+'],
 }
 
@@ -541,6 +545,7 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = handle_request
     do_POST = handle_request
     do_PATCH = handle_request
+    do_DELETE = handle_request
 
 
 if __name__ == '__main__':

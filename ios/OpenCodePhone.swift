@@ -237,6 +237,7 @@ struct ConnectView: View {
                 }
             }
             .navigationTitle("Conversas")
+            .listStyle(.plain)
             .searchable(text: $searchText, isPresented: $searchPresented, placement: .navigationBarDrawer, prompt: "Nome da conversa")
             .task(id: searchText) {
                 searchTicket = UUID()
@@ -252,18 +253,16 @@ struct ConnectView: View {
             .navigationDestination(for: Session.self) { ChatView(session: $0) }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 16) {
-                        Button("Ajustes", systemImage: "slider.horizontal.3") { settings = true }
-                        Button("Arquivos do notebook", systemImage: "folder") { fileBrowser = true }
-                        Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
                         Menu {
+                            Button("Ajustes", systemImage: "gearshape") { settings = true }
+                            Button("Arquivos do notebook", systemImage: "folder") { fileBrowser = true }
+                            Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
                             Button("Tarefas deste iPhone", systemImage: "checklist") { taskHistory = true }
                             Button("Central de transferências", systemImage: "arrow.up.arrow.down") { transferCenter = true }
                             Button("Projetos favoritos", systemImage: "star") { projectPicker = true }
                             Button("Pasta automática do iPhone", systemImage: "arrow.up.doc") { inboxSettings = true }
                             Button("Controlar meu iPhone (USB)", systemImage: "cable.connector") { phoneControl = true }
-                        } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Recursos do Pocket")
-                    }
+                        } label: { Image(systemName: "line.3.horizontal") }.accessibilityLabel("Menu do Pocket")
                 }
                 ToolbarItem(placement: .topBarTrailing) { Button("Nova conversa", systemImage: "square.and.pencil") { create = true } }
             }
@@ -497,6 +496,7 @@ struct ConnectView: View {
     @State private var showChatSearch = false
     @State private var showFullSearch = false
     @State private var voiceCall = false
+    @State private var sessionActions = false
     @State private var kzlActivity = false
     @State private var kzlVoiceMessages: [Message] = []
     @State private var kzlResultMessages: [Message] = []
@@ -526,7 +526,6 @@ struct ConnectView: View {
                     .font(.caption).padding(.vertical, 4)
             }
             connectionStrip
-            Text(store.activity).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
             if showChatSearch {
                 TextField("Buscar nas mensagens carregadas", text: $chatQuery).textFieldStyle(.roundedBorder).padding(.horizontal)
             }
@@ -535,8 +534,9 @@ struct ConnectView: View {
             questionCards
             permissionCards
             attachmentStrip
-            composer
         }
+        .background(Color(uiColor: .systemBackground))
+        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
     }
     @ViewBuilder private var controlHeader: some View {
             if session.isPhoneControl {
@@ -553,6 +553,7 @@ struct ConnectView: View {
     }
     private var modeHeader: some View {
             HStack(spacing: 10) {
+                Menu {
                 ForEach(["plan", "build"], id: \.self) { agent in
                     Button {
                         Task { await switchAgent(agent) }
@@ -567,15 +568,19 @@ struct ConnectView: View {
                         .accessibilityValue((session.agent ?? "build") == agent ? "Selecionado" : "")
                         .accessibilityAddTraits((session.agent ?? "build") == agent ? .isSelected : [])
                 }
+                } label: {
+                    Label((session.agent ?? "build").capitalized, systemImage: "chevron.down")
+                        .font(.subheadline.weight(.medium))
+                }.disabled(changingAgent || store.sending)
                 Spacer(minLength: 0)
                 Button { options = true } label: {
                     Text(session.model?.id ?? "Modelo").font(.system(.caption, design: .monospaced)).lineLimit(1)
                 }.accessibilityLabel("Selecionar modelo e ajustar conversa")
-            }.padding(.horizontal).padding(.vertical, 6).background(.bar)
+            }.padding(.horizontal, 20).padding(.vertical, 8).foregroundStyle(.secondary)
     }
     private var connectionStrip: some View {
             HStack {
-                Label(store.showingCache ? "Histórico salvo" : store.liveConnected ? "Ao vivo" : "Consulta periódica", systemImage: store.showingCache ? "internaldrive" : store.liveConnected ? "dot.radiowaves.left.and.right" : "arrow.clockwise")
+                Label(store.showingCache ? "Histórico salvo" : store.activity, systemImage: store.showingCache ? "internaldrive" : store.liveConnected ? "dot.radiowaves.left.and.right" : "arrow.clockwise")
                     .foregroundStyle(store.liveConnected ? Color.green : .secondary)
                 Spacer()
                 if draftError != nil { Text("Rascunho não salvo").foregroundStyle(.red) }
@@ -614,6 +619,7 @@ struct ConnectView: View {
                 .coordinateSpace(name: "chat-scroll")
                 .background(GeometryReader { geometry in Color.clear.preference(key: ChatHeightPreference.self, value: geometry.size.height) })
                 .defaultScrollAnchor(.bottom)
+                .scrollDismissesKeyboard(.interactively)
                 .modifier(ChatScrollInteraction(following: $following, interacting: $scrollInteracting, bottom: bottomY, height: viewportHeight))
                 .onPreferenceChange(ChatHeightPreference.self) { viewportHeight = $0 }
                 .onPreferenceChange(ChatBottomPreference.self) { value in
@@ -699,9 +705,15 @@ struct ConnectView: View {
             }
     }
     private var composer: some View {
-            HStack(alignment: .bottom, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Mensagem…", text: $draft, axis: .vertical)
+                    .lineLimit(1...6).padding(.horizontal, 8).padding(.top, 8)
+                    .accessibilityLabel("Mensagem").accessibilityIdentifier("chat.composer")
+            HStack(alignment: .center, spacing: 16) {
                 Menu {
                     Button("Buscar no histórico completo", systemImage: "text.magnifyingglass") { showFullSearch = true }
+                    Button("Comandos, skills e fila", systemImage: "slider.horizontal.3") { sessionActions = true }
+                    Button("Agendamentos", systemImage: "calendar.badge.clock") { sessionActions = true }
                     Button("Favoritar projeto", systemImage: "star") {
                         do { try projects.add(server: api.server, name: URL(fileURLWithPath: session.location.directory).lastPathComponent.isEmpty ? "Projeto" : URL(fileURLWithPath: session.location.directory).lastPathComponent, directory: session.location.directory) }
                         catch { store.sendError = error.localizedDescription }
@@ -710,12 +722,12 @@ struct ConnectView: View {
                     Button("Arquivos", systemImage: "folder") { selectingFiles = true }
                     Button("Fotos", systemImage: "photo") { selectingPhotos = true }
                 } label: {
-                    Image(systemName: importing ? "hourglass" : "plus.circle").font(.system(size: 28)).padding(.bottom, 4)
+                    Image(systemName: importing ? "hourglass" : "plus").font(.system(size: 22)).frame(width: 44, height: 44)
                 }.disabled(importing || store.sending || attachments.count >= 5).accessibilityLabel("Anexar fotos ou arquivos")
-                TextField("Peça algo ao OpenCode…", text: $draft, axis: .vertical)
-                    .lineLimit(1...6).padding(12).background(Style.paper, in: RoundedRectangle(cornerRadius: 16))
-                    .accessibilityLabel("Mensagem")
-                    .accessibilityIdentifier("chat.composer")
+                Spacer()
+                Button { voiceCall = true } label: {
+                    Image(systemName: "waveform").font(.system(size: 22)).frame(width: 44, height: 44)
+                }.accessibilityLabel("Conversar por voz")
                 Button {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     let submitted = attachments
@@ -729,13 +741,14 @@ struct ConnectView: View {
                     Image(systemName: store.sending ? "ellipsis" : "arrow.up.circle.fill").font(.system(size: 36))
                 }.disabled(store.sending || importing || changingAgent || api.reachable == false || (session.isPhoneControl && !controlAllowed) || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty))
                     .accessibilityLabel("Enviar mensagem")
-            }.padding().background(.bar)
+            }
+            }.padding(8).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 28))
+                .padding(.horizontal, 12).padding(.vertical, 8).background(Color(uiColor: .systemBackground))
     }
     private var navigationContent: some View {
         chatContent
         .navigationTitle(session.isKzL ? "Agente KzL" : session.title ?? "Conversa").navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { Button("Ligar por voz", systemImage: "phone") { voiceCall = true } }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Nome, modo e modelo", systemImage: "slider.horizontal.3") { options = true }
@@ -751,6 +764,7 @@ struct ConnectView: View {
         .sheet(isPresented: $controlPanel) { PhoneControlView() }
         .sheet(isPresented: $showFullSearch) { FullChatSearchView(sessionID: session.id) }
         .sheet(isPresented: $voiceCall) { VoiceCallView(session: session) }
+        .sheet(isPresented: $sessionActions) { SessionActionsView(session: session) }
         .sheet(isPresented: $kzlActivity) { NavigationStack { KzLTasksView().toolbar { Button("Fechar") { kzlActivity = false } } } }
         .task(id: "kzl-\(phase)-\(session.id)") {
             guard phase == .active, session.isKzL else { return }
@@ -922,7 +936,7 @@ struct MessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(message.type == "user" ? "VOCÊ" : assistantLabel).font(.system(.caption2, design: .monospaced, weight: .bold)).foregroundStyle(Style.blue)
+                if message.type != "user" { Text(assistantLabel == "OPENCODE" ? "OpenCode" : assistantLabel).font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
                 Spacer()
                 if message.type == "assistant" && message.time.completed == nil { ProgressView().controlSize(.mini).accessibilityLabel("Em execução") }
             }
@@ -952,8 +966,9 @@ struct MessageView: View {
                 }
             }
         }
-        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-        .background(message.type == "user" ? Style.blue.opacity(0.07) : Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .padding(message.type == "user" ? 16 : 2).frame(maxWidth: .infinity, alignment: .leading)
+        .background(message.type == "user" ? Color(uiColor: .secondarySystemBackground) : Color.clear, in: RoundedRectangle(cornerRadius: 24))
+        .padding(.leading, message.type == "user" ? 44 : 0)
         .contextMenu { Button("Copiar mensagem", systemImage: "doc.on.doc") { UIPasteboard.general.string = ([message.text ?? ""] + (message.content ?? []).compactMap(\.text)).joined(separator: "\n") } }
     }
     func status(_ value: String?) -> String {
