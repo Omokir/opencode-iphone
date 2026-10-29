@@ -7,6 +7,9 @@ class SessionActionsPolicyTests(unittest.TestCase):
         for method, path in [
             ('GET', '/api/command'), ('GET', '/api/skill'),
             ('GET', '/api/session/ses_test/inbox'),
+            ('GET', '/api/session/ses_test/diff'),
+            ('GET', '/api/experimental/session/ses_test/terminal/read'),
+            ('GET', '/api/permission/request'), ('GET', '/api/form'),
             ('POST', '/api/session/ses_test/command'),
             ('POST', '/api/experimental/session/ses_test/skill'),
             ('POST', '/api/experimental/schedule'),
@@ -17,6 +20,7 @@ class SessionActionsPolicyTests(unittest.TestCase):
         for method, path in [
             ('GET', '/api/credential'), ('DELETE', '/api/session/ses_test'),
             ('POST', '/api/session/ses_test/shell'),
+            ('POST', '/api/experimental/session/ses_test/terminal'),
             ('POST', '/api/experimental/config'),
             ('DELETE', '/api/experimental/schedule/job_1/extra'),
         ]:

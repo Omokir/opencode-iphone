@@ -22,7 +22,9 @@ Activity centralizes approvals/questions for all sessions in a selected
 project. Core scopes these endpoints by location; the UI does not claim a
 global cross-project inventory. Opening an item loads its original session.
 
-Pending follow-up: dedicated rich diff/terminal
-views, recurring-schedule creation, device screenshots and acoustic voice
+Execution detail provides last-turn per-file diffs and read-only terminal
+snapshot (100 lines), refreshed manually. Large displayed text is capped.
+
+Pending follow-up: recurring-schedule creation, device screenshots and acoustic voice
 acceptance. Existing per-conversation approvals and KzL tasks remain available.
 Compilation does not establish physical visual/audio acceptance.

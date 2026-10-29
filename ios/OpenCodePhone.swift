@@ -521,6 +521,7 @@ struct ConnectView: View {
     @State private var showFullSearch = false
     @State private var voiceCall = false
     @State private var sessionActions = false
+    @State private var executionDetails = false
     @State private var kzlActivity = false
     @State private var kzlVoiceMessages: [Message] = []
     @State private var kzlResultMessages: [Message] = []
@@ -776,6 +777,7 @@ struct ConnectView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Nome, modo e modelo", systemImage: "slider.horizontal.3") { options = true }
+                    Button("Alterações e terminal", systemImage: "terminal") { executionDetails = true }
                     Button("Arquivos do projeto", systemImage: "folder") { fileBrowser = true }
                     Button("Interromper tarefa", systemImage: "stop.circle", role: .destructive) { stop = true }
                 } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Opções da conversa")
@@ -789,6 +791,7 @@ struct ConnectView: View {
         .sheet(isPresented: $showFullSearch) { FullChatSearchView(sessionID: session.id) }
         .sheet(isPresented: $voiceCall) { VoiceCallView(session: session) }
         .sheet(isPresented: $sessionActions) { SessionActionsView(session: session) }
+        .sheet(isPresented: $executionDetails) { ExecutionDetailsView(session: session) }
         .sheet(isPresented: $kzlActivity) { NavigationStack { KzLTasksView().toolbar { Button("Fechar") { kzlActivity = false } } } }
         .task(id: "kzl-\(phase)-\(session.id)") {
             guard phase == .active, session.isKzL else { return }
