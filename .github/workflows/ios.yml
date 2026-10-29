@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
       - name: Gateway tests
         run: python3 -m unittest discover -s bridge -v
       - name: Native model regression tests
@@ -42,9 +42,10 @@ jobs:
           python3 -c 'import subprocess; subprocess.run(["build/chat-store-test"], timeout=30, check=True)'
           xcrun swiftc -swift-version 5 -parse-as-library ios/ChatScrollState.swift tests/ChatScrollTests.swift -o build/chat-scroll-test
           build/chat-scroll-test
-          # One-time red/green proof against the unmodified 0.12.0 parent.
-          if [ "$(git rev-parse HEAD^)" = "2c4ef0c0e75d17b5127d7be92818c2f1b7a5a69e" ]; then
-            git show HEAD^:ios/ChatStore.swift > build/legacy-chat-store.swift
+          # Red/green proof while the unmodified 0.12.0 baseline is in shallow history.
+          BASELINE=2c4ef0c0e75d17b5127d7be92818c2f1b7a5a69e
+          if git cat-file -e "$BASELINE:ios/ChatStore.swift" 2>/dev/null; then
+            git show "$BASELINE:ios/ChatStore.swift" > build/legacy-chat-store.swift
             xcrun swiftc -swift-version 5 -target "$TARGET" -parse-as-library ios/Models.swift build/legacy-chat-store.swift tests/ChatStoreTests.swift -o build/legacy-chat-store-test
             python3 -c 'import subprocess; p = subprocess.run(["build/legacy-chat-store-test"], timeout=30, text=True, capture_output=True); print(p.stdout); assert p.returncode == 1 and "FAIL: opening chat loads history" in p.stdout and "FAIL: newer assistant-only stream" in p.stdout, "Legacy fixture did not reproduce expected regressions"'
           fi

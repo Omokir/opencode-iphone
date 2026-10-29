@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Combine
 
 // Transport and side effects are fixtures. The executable links the real ChatStore.
 @MainActor final class API {
@@ -46,6 +47,7 @@ enum ConnectionAdvice { static func describe(_ error: Error) -> String { "Fixtur
         let session = try JSONDecoder().decode(Item<Session>.self, from: sessionJSON).data
         let history = Data(#"{"data":[{"id":"msg_user","type":"user","text":"Earlier question","time":{"created":1}},{"id":"msg_answer","type":"assistant","time":{"created":2},"content":[{"type":"text","text":"Old response"}]}],"cursor":{"next":"older"}}"#.utf8)
         let live = Data(#"{"data":[{"id":"msg_answer","type":"assistant","time":{"created":2},"content":[{"type":"text","text":"New response"}]}]}"#.utf8)
+        let initial = Data(String(decoding: live, as: UTF8.self).replacingOccurrences(of: "New response", with: "Initial response").utf8)
         let empty = Data(#"{"data":[]}"#.utf8)
 
         let metadataFailure = API { path in
@@ -72,14 +74,17 @@ enum ConnectionAdvice { static func describe(_ error: Error) -> String { "Fixtur
         await cached.refresh(offline, session: session)
         check(cached.showingCache && cached.messages.count == 2, "cached history remains visible offline")
 
-        let requested = Signal(), release = Signal(), streamed = Signal()
+        let requested = Signal(), release = Signal(), streamed = Signal(), applied = Signal()
         let racing = API { path in
-            if path.contains("/message?") { return live }
+            if path.contains("/message?") { return initial }
             if path.hasSuffix("/permission") || path.hasSuffix("/form") { return empty }
             return sessionJSON
         }
         let store = ChatStore()
         await store.refresh(racing, session: session)
+        let observation = store.$messages.sink { messages in
+            if messages.first(where: { $0.id == "msg_answer" })?.content?.first?.text == "New response" { applied.send() }
+        }
         racing.handler = { path in
             if path.contains("type=assistant") { streamed.send(); return live }
             if path.contains("/message?") { requested.send(); await release.wait(); return history }
@@ -90,11 +95,11 @@ enum ConnectionAdvice { static func describe(_ error: Error) -> String { "Fixtur
         await requested.wait()
         store.receiveEvent("message.updated", api: racing, session: session)
         await streamed.wait()
-        // The fixture transport completes on this actor; let its caller finish applying.
-        await Task.yield()
+        await applied.wait()
         release.send()
         await loading.value
         store.stopLiveUpdates()
+        observation.cancel()
         check(store.messages.contains { $0.id == "msg_user" }, "newer assistant-only stream cannot discard older full history page")
         let response = store.messages.first { $0.id == "msg_answer" }?.content?.first?.text
         check(response == "New response", "late full page cannot overwrite newer streamed text")
