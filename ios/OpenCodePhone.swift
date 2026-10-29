@@ -275,6 +275,7 @@ struct ConnectView: View {
                 if sessions.isEmpty, let page: Page<Session> = api.cached("/api/session?limit=30&archived=false&parentID=null&order=desc") {
                     sessions = page.data; cursor = page.cursor?.next; cachedList = true
                 }
+                if kzl == nil { kzl = sessions.first(where: \.isKzL) }
             }
             .task(id: api.server) { await loadKzL() }
             .task(id: phase) {
@@ -761,7 +762,7 @@ struct ConnectView: View {
                     let jobs: KzLTaskList = try await api.request("/phone/kzl/tasks")
                     guard api.connected, api.server == server, api.connectionID == connection, !Task.isCancelled else { return }
                     kzlVoiceMessages = memory.turns.map(\.message)
-                    kzlResultMessages = jobs.tasks.filter(\.terminal).map { task in
+                    kzlResultMessages = jobs.tasks.filter(\.terminal).prefix(20).map { task in
                         Message(id: "kzl-result-" + task.id, type: "assistant", text: task.label + " · " + task.text + "\n" + task.result,
                                 content: nil, time: .init(created: task.updated, completed: task.updated), error: nil, files: nil)
                     }

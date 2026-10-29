@@ -68,6 +68,25 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(self.request('/phone/kzl/task/job_x/../../shell', 'test-token', {})[0], 400)
             upstream.assert_not_called()
 
+    def test_kzl_wire_identity_queue_and_revision_hint(self):
+        from test_kzl import Core
+        core = Core()
+        with patch.object(server, 'upstream', side_effect=core):
+            status, agent = self.request('/phone/kzl/ensure', 'test-token', {})
+            self.assertEqual(status, 200)
+            self.assertTrue(agent['data']['metadata']['kzlAgent'])
+            self.assertEqual(self.request('/phone/kzl/ensure', 'test-token', {})[1]['data']['id'], agent['data']['id'])
+            status, job = self.request('/phone/kzl/submit', 'test-token', {'callID': 'call_wire', 'text': 'Inspect fixture'})
+            self.assertEqual(status, 200)
+            self.assertEqual(job['state'], 'queued')
+            self.assertEqual(self.request('/phone/kzl/tasks', 'test-token')[1]['tasks'][0]['id'], job['id'])
+            request = urllib.request.Request(f'http://127.0.0.1:{self.http.server_port}/phone/kzl/events?revision=', headers={'Authorization': 'Bearer test-token'})
+            with urllib.request.urlopen(request, timeout=3) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), b'data: {"type":"changed"}\n\n')
+            self.http.kzl.tick()
+            self.assertEqual(self.request('/phone/kzl/tasks', 'test-token')[1]['tasks'][0]['state'], 'admitted')
+
     def test_power_routes_do_not_execute_without_explicit_device_ticket(self):
         self.assertEqual(self.request('/phone/power/status')[0], 401)
         self.assertEqual(self.request('/phone/power/status', 'test-token')[1]['powerOff'], 'unavailable')

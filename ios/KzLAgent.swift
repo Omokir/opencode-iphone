@@ -72,6 +72,7 @@ struct KzLTasksView: View {
     @State private var tasks: [KzLTask] = []
     @State private var turns: [KzLMemory.Turn] = []
     @State private var error: String?
+    @State private var cancelling: KzLTask?
     var body: some View {
         List {
             Section {
@@ -89,6 +90,10 @@ struct KzLTasksView: View {
                             if !task.result.isEmpty { Text(task.result).font(.caption).lineLimit(3).foregroundStyle(.secondary) }
                         }
                     }
+                    .disabled(["queued", "creating"].contains(task.state))
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if task.canCancel { Button("Interromper", role: .destructive) { cancelling = task } }
+                    }
                 }
             }
             Section("Histórico de voz · recente") {
@@ -101,6 +106,17 @@ struct KzLTasksView: View {
                 }
             }
         }.navigationTitle("Agente KzL · atividade")
+            .alert("Interromper tarefa?", isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } })) {
+                Button("Interromper", role: .destructive) {
+                    guard let task = cancelling else { return }
+                    cancelling = nil
+                    Task {
+                        do { let _: KzLTask = try await api.request("/phone/kzl/task/\(task.id)/cancel", method: "POST", body: [:]); await refresh() }
+                        catch { self.error = "Interrupção não confirmada; confira estado antes de repetir." }
+                    }
+                }
+                Button("Voltar", role: .cancel) { cancelling = nil }
+            } message: { Text("Afeta somente tarefa selecionada. Não desfaz ações já realizadas.") }
             .refreshable { await refresh() }
             .task(id: phase) {
                 guard phase == .active else { return }

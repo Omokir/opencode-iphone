@@ -337,6 +337,11 @@ class KzL:
             raise KzLError(400, 'Turno inválido.')
         parent = self.session_id()
         with self.lock, self.db() as db:
+            existing = db.execute('SELECT role,text FROM turns WHERE id=?', (key,)).fetchone()
+            if existing:
+                if (existing['role'], existing['text']) != (role, text):
+                    raise KzLError(409, 'Identificador de turno já usado por outro texto.')
+                return {'saved': True}
             if db.execute('SELECT count(*) FROM turns').fetchone()[0] >= 100000:
                 raise KzLError(409, 'Histórico de voz cheio; nada apagado.')
             inserted = db.execute('INSERT OR IGNORE INTO turns VALUES (?,?,?,?,?)', (key, parent, role, text, time.time())).rowcount
