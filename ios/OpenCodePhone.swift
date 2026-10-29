@@ -507,10 +507,8 @@ struct ConnectView: View {
     @State private var modeError: String?
     @State private var fileBrowser = false
     @State private var preview: LocalPreview?
-    @State private var following = true
-    @State private var scrollInteracting = false
-    @State private var bottomY: CGFloat = 0
-    @State private var viewportHeight: CGFloat = 0
+    @State private var scroll = ChatScrollState()
+    @State private var followTask: Task<Void, Never>?
     @State private var draftLoaded = false
     @State private var draftRecoveryBlocked = false
     @State private var draftSavedAt: Date?
@@ -525,7 +523,6 @@ struct ConnectView: View {
     @State private var kzlActivity = false
     @State private var kzlVoiceMessages: [Message] = []
     @State private var kzlResultMessages: [Message] = []
-    @State private var visibleMessage: String?
     @State private var restoredPosition = false
     private let drafts = DraftStore()
     init(session: Session) {
@@ -631,49 +628,70 @@ struct ConnectView: View {
                         }) { message in MessageView(message: message, assistantLabel: session.isKzL ? "AGENTE KZL" : "OPENCODE").id(message.id) }
                         if timelineMessages.isEmpty && store.refreshed {
                             ContentUnavailableView("Converse com notebook", systemImage: "text.bubble", description: Text("Envie tarefa para começar."))
+                        } else if timelineMessages.isEmpty && store.loadingHistory {
+                            ProgressView("Carregando histórico…").frame(maxWidth: .infinity).padding(.vertical, 24)
                         }
-                        Color.clear.frame(height: 1).id("bottom").background(GeometryReader { geometry in
+                        Color.clear.frame(height: 1).id("bottom")
+                    }.scrollTargetLayout().padding().background(GeometryReader { geometry in
+                        // Measure the stack, not a lazily materialized last row.
                             Color.clear.preference(key: ChatBottomPreference.self, value: geometry.frame(in: .named("chat-scroll")).maxY)
                         })
-                    }.scrollTargetLayout().padding()
                 }
-                .scrollPosition(id: $visibleMessage, anchor: .top)
-                .onChange(of: visibleMessage) { _, value in
-                    if restoredPosition && scrollInteracting && chatQuery.isEmpty, let value { UserDefaults.standard.set(value, forKey: "chat.position." + HistoryCache.key(api.server + "|" + session.id)) }
+                .scrollPosition(id: Binding(get: { scroll.positionID }, set: { scroll.record($0) }), anchor: .top)
+                .onChange(of: scroll.visibleID) { _, value in
+                    if restoredPosition && scroll.interacting && chatQuery.isEmpty, let value { UserDefaults.standard.set(value, forKey: "chat.position." + HistoryCache.key(api.server + "|" + session.id)) }
                 }
                 .coordinateSpace(name: "chat-scroll")
                 .background(GeometryReader { geometry in Color.clear.preference(key: ChatHeightPreference.self, value: geometry.size.height) })
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
-                .modifier(ChatScrollInteraction(following: $following, interacting: $scrollInteracting, bottom: bottomY, height: viewportHeight))
-                .onPreferenceChange(ChatHeightPreference.self) { viewportHeight = $0 }
-                .onPreferenceChange(ChatBottomPreference.self) { value in
-                    bottomY = value
-                    if !scrollInteracting && value <= viewportHeight + 80 { following = true }
-                }
-                .onChange(of: "\(store.renderRevision)-\(kzlVoiceMessages.count)-\(kzlResultMessages.count)") { _, _ in
+                .modifier(ChatScrollInteraction(state: $scroll))
+                .onPreferenceChange(ChatHeightPreference.self) { _ in scheduleFollow(proxy) }
+                .onPreferenceChange(ChatBottomPreference.self) { _ in scheduleFollow(proxy) }
+                .onChange(of: scroll.interacting) { _, _ in scheduleFollow(proxy) }
+                .onChange(of: scroll.following) { _, _ in scheduleFollow(proxy) }
+                .onChange(of: "\(store.renderRevision)-\(kzlVoiceMessages.count)-\(kzlResultMessages.count)", initial: true) { _, _ in
                     if !restoredPosition, !timelineMessages.isEmpty {
                         restoredPosition = true
                         if let saved = UserDefaults.standard.string(forKey: "chat.position." + HistoryCache.key(api.server + "|" + session.id)), timelineMessages.contains(where: { $0.id == saved }) {
-                            following = false; proxy.scrollTo(saved, anchor: .top); return
+                            followTask?.cancel(); scroll.restore(saved); return
                         }
                     }
-                    if following && !scrollInteracting && !store.loadingOlder { proxy.scrollTo("bottom", anchor: .bottom) }
+                    scheduleFollow(proxy)
                 }
                 .overlay(alignment: .bottomTrailing) {
-                    if !following {
+                    if !scroll.following {
                         Button("Últimas mensagens", systemImage: "arrow.down") {
-                            following = true; proxy.scrollTo("bottom", anchor: .bottom)
+                            scroll.latest(); scheduleFollow(proxy)
                             UserDefaults.standard.removeObject(forKey: "chat.position." + HistoryCache.key(api.server + "|" + session.id))
                         }
                             .font(.caption.weight(.semibold)).buttonStyle(.borderedProminent).padding(10)
+                            .accessibilityIdentifier("chat.latest")
                     }
                 }
             }
     }
+    private func scheduleFollow(_ proxy: ScrollViewProxy) {
+        followTask?.cancel()
+        guard scroll.shouldFollow, !store.loadingOlder, chatQuery.isEmpty else { return }
+        followTask = Task { @MainActor in
+            // Commit the new rows/binding before asking SwiftUI to align the tail.
+            // Subsequent layout/keyboard changes request another alignment.
+            await Task.yield()
+            guard !Task.isCancelled, scroll.shouldFollow, !store.loadingOlder, chatQuery.isEmpty else { return }
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+    }
     @ViewBuilder private var notices: some View {
             if let error = store.error {
-                Text(error).font(.caption).foregroundStyle(.red).padding(10).frame(maxWidth: .infinity).background(.red.opacity(0.06))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                    Button("Tentar novamente") { Task { await store.refresh(api, session: session) } }.disabled(store.loadingHistory)
+                }.padding(10).frame(maxWidth: .infinity).background(.red.opacity(0.06))
+            }
+            if let error = store.detailsError {
+                Text(error).font(.caption2).foregroundStyle(.secondary).padding(.horizontal)
             }
             if api.reachable == false {
                 Label("Sem conexão com notebook. Verifique Tailscale. Nenhuma mensagem será reenviada automaticamente.", systemImage: "wifi.exclamationmark")
@@ -851,8 +869,8 @@ struct ConnectView: View {
     }
     private var lifecycleContent: some View {
         presentationContent
-        .onAppear { restoreDraft() }
-        .onDisappear { draftSaveTask?.cancel(); saveDraft(); store.stopLiveUpdates() }
+        .onAppear { store.open(api, session: session); restoreDraft() }
+        .onDisappear { followTask?.cancel(); draftSaveTask?.cancel(); saveDraft(); store.stopLiveUpdates() }
         .onChange(of: draft) { _, _ in scheduleDraft() }
         .onChange(of: attachments.map(\.id)) { _, _ in scheduleDraft() }
         .onChange(of: store.sendUnconfirmed) { _, _ in scheduleDraft() }
@@ -862,7 +880,7 @@ struct ConnectView: View {
             session = value
             markReadIfVisible(value)
         }
-        .task(id: phase) {
+        .task(id: "live-\(phase)-\(session.id)-\(api.server)-\(api.connectionID)") {
             guard phase == .active else { return }
             defer { store.liveConnected = false }
             var delay = 1
@@ -876,7 +894,7 @@ struct ConnectView: View {
                 delay = min(10, delay * 2)
             }
         }
-        .task(id: phase) {
+        .task(id: "history-\(phase)-\(session.id)-\(api.server)-\(api.connectionID)") {
             guard phase == .active else { return }
             while !Task.isCancelled {
                 await store.refresh(api, session: session)

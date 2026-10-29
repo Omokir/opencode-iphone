@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - name: Gateway tests
         run: python3 -m unittest discover -s bridge -v
       - name: Native model regression tests
@@ -33,6 +35,19 @@ jobs:
         run: |
           xcrun swiftc -parse-as-library -framework CryptoKit ios/Models.swift ios/RemoteFiles.swift ios/PinStore.swift ios/ProjectFavorites.swift ios/DraftStore.swift ios/InboxLocalFiles.swift tests/StoreTests.swift -o build/stores-test
           build/stores-test
+      - name: Native chat history and follow regression tests
+        run: |
+          TARGET="$(uname -m)-apple-macos13.0"
+          xcrun swiftc -swift-version 5 -target "$TARGET" -parse-as-library ios/Models.swift ios/ChatStore.swift tests/ChatStoreTests.swift -o build/chat-store-test
+          python3 -c 'import subprocess; subprocess.run(["build/chat-store-test"], timeout=30, check=True)'
+          xcrun swiftc -swift-version 5 -parse-as-library ios/ChatScrollState.swift tests/ChatScrollTests.swift -o build/chat-scroll-test
+          build/chat-scroll-test
+          # One-time red/green proof against the unmodified 0.12.0 parent.
+          if [ "$(git rev-parse HEAD^)" = "2c4ef0c0e75d17b5127d7be92818c2f1b7a5a69e" ]; then
+            git show HEAD^:ios/ChatStore.swift > build/legacy-chat-store.swift
+            xcrun swiftc -swift-version 5 -target "$TARGET" -parse-as-library ios/Models.swift build/legacy-chat-store.swift tests/ChatStoreTests.swift -o build/legacy-chat-store-test
+            python3 -c 'import subprocess; p = subprocess.run(["build/legacy-chat-store-test"], timeout=30, text=True, capture_output=True); print(p.stdout); assert p.returncode == 1 and "FAIL: opening chat loads history" in p.stdout and "FAIL: newer assistant-only stream" in p.stdout, "Legacy fixture did not reproduce expected regressions"'
+          fi
       - name: Build native iPhone IPA
         run: bash scripts/build-ios.sh
       - name: Launch native app in iPhone simulator

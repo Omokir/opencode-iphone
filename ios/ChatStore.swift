@@ -19,6 +19,8 @@ final class ChatStore: ObservableObject {
     @Published var liveConnected = false
     @Published var renderRevision = 0
     @Published var showingCache = false
+    @Published private(set) var loadingHistory = false
+    @Published private(set) var detailsError: String?
     var activity: String {
         if showingCache { return "Histórico salvo · estado atual não confirmado" }
         if !permissions.isEmpty { return "Aguardando permissão" }
@@ -32,23 +34,54 @@ final class ChatStore: ObservableObject {
     private var pendingFingerprint: Data?
     private var metadataRevision = 0
     private var ticket = 0
-    private var appliedMessages = 0
+    private var messageTickets: [String: Int] = [:]
+    private var appliedHistory = 0
     private var appliedMetadata = 0
     private var appliedFull = 0
     private var pump: Task<Void, Never>?
     private var pumpRevision = 0
     private var dirty = false
     private var fullDirty = false
+    private struct Scope: Equatable {
+        let server: String
+        let connection: UUID
+        let session: String
+    }
+    private var scope: Scope?
+
+    /// Synchronous cache hydration belongs to opening a view, not to an SSE event.
+    func open(_ api: API, session: Session) {
+        let next = Scope(server: api.server, connection: api.connectionID, session: session.id)
+        guard scope != next else { return }
+        stopLiveUpdates()
+        scope = next
+        messages = []; latestPage = []; permissions = []; questions = []; permissionDetails = [:]
+        sessionSnapshot = nil; error = nil; detailsError = nil
+        refreshed = false; showingCache = false; olderCursor = nil; loadingHistory = false
+        messageTickets = [:]; appliedHistory = 0; appliedFull = 0; appliedMetadata = 0
+        metadataRevision &+= 1
+        if let page: Page<Message> = api.cached("/api/session/\(session.id)/message?limit=50&order=desc") {
+            applyMessages(page, ticket: 0)
+            olderCursor = page.cursor?.next
+            showingCache = true
+        }
+    }
+    private func isCurrent(_ captured: Scope, api: API) -> Bool {
+        scope == captured && api.connected && api.server == captured.server && api.connectionID == captured.connection && !Task.isCancelled
+    }
 
     private func nextTicket() -> Int { ticket &+= 1; return ticket }
     private func applyMessages(_ page: Page<Message>, ticket: Int, older: Bool = false) {
-        guard older || ticket >= appliedMessages else { return }
         var merged = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         for message in page.data where message.visible {
-            if !older || merged[message.id] == nil { merged[message.id] = message }
+            // A newer assistant-only page must not veto missing IDs in a full page.
+            // Conversely, a late full page cannot replace newer streamed text.
+            if merged[message.id] == nil || (!older && ticket >= (messageTickets[message.id] ?? 0)) {
+                merged[message.id] = message
+                messageTickets[message.id] = older ? 0 : ticket
+            }
         }
         messages = merged.values.sorted { $0.time.created == $1.time.created ? $0.id < $1.id : $0.time.created < $1.time.created }
-        if !older { appliedMessages = ticket }
         renderRevision &+= 1
     }
     private func applySession(_ value: Session, ticket: Int, revision: Int) {
@@ -59,59 +92,67 @@ final class ChatStore: ObservableObject {
     }
 
     func refresh(_ api: API, session: Session, olderPage: Bool = false) async {
-        let refreshedServer = api.server
-        if messages.isEmpty, !refreshed, !olderPage,
-           let page: Page<Message> = api.cached("/api/session/\(session.id)/message?limit=50&order=desc") {
-            applyMessages(page, ticket: 0)
-            olderCursor = page.cursor?.next
-            showingCache = true
-        }
+        open(api, session: session)
+        guard let captured = scope else { return }
         let currentTicket = nextTicket()
         let revision = metadataRevision
+        if !olderPage { loadingHistory = true }
+        defer { if scope == captured && !olderPage { loadingHistory = false } }
+        // History is the primary result. Metadata/permissions are independent details.
         do {
-            let sessionInfo: Item<Session> = try await api.request("/api/session/\(session.id)")
             var path = "/api/session/\(session.id)/message?limit=50"
             if olderPage, let cursor = olderCursor { path += "&cursor=" + API.escape(cursor) }
             else { path += "&order=desc" }
             let page: Page<Message> = try await api.request(path)
-            guard api.connected, api.server == refreshedServer else { return }
-            if !olderPage { latestPage = page.data }
-            if olderPage || !refreshed { olderCursor = page.cursor?.next }
+            guard isCurrent(captured, api: api) else { return }
+            let firstPage = !refreshed
+            if olderPage || firstPage { olderCursor = page.cursor?.next }
             applyMessages(page, ticket: currentTicket, older: olderPage)
-            showingCache = false
-            let requests: Page<Permission> = try await api.request("/api/session/\(session.id)/permission")
-            let questionsPage: Page<QuestionForm> = try await api.request("/api/session/\(session.id)/form")
-            guard currentTicket >= appliedFull else { return }
-            appliedFull = currentTicket
-            permissions = requests.data
-            for permission in requests.data {
-                PocketNotifications.shared.post(key: "permission|\(api.server)|\(session.id)|\(permission.id)", title: "Permissão aguardando revisão", body: "Abra Pocket e leia pedido antes de autorizar.")
+            if !olderPage && currentTicket >= appliedHistory {
+                appliedHistory = currentTicket
+                let current = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+                latestPage = page.data.map { current[$0.id] ?? $0 }
+                showingCache = false; error = nil; refreshed = true
             }
-            questions = questionsPage.data
+        } catch is CancellationError { return }
+        catch let failure as URLError where failure.code == .cancelled { return }
+        catch {
+            if isCurrent(captured, api: api), currentTicket >= appliedHistory { self.error = ConnectionAdvice.describe(error) }
+            return
+        }
+        guard isCurrent(captured, api: api), !olderPage else { return }
+        loadingHistory = false
+        do {
+            let sessionInfo: Item<Session> = try await api.request("/api/session/\(session.id)")
+            guard isCurrent(captured, api: api) else { return }
+            applySession(sessionInfo.data, ticket: currentTicket, revision: revision)
+            async let requestsTask: Page<Permission> = api.request("/api/session/\(session.id)/permission")
+            async let questionsTask: Page<QuestionForm> = api.request("/api/session/\(session.id)/form")
+            let (requests, questionsPage) = try await (requestsTask, questionsTask)
+            guard isCurrent(captured, api: api), currentTicket >= appliedFull else { return }
+            appliedFull = currentTicket
+            permissions = requests.data; questions = questionsPage.data; detailsError = nil
             permissionDetails = permissionDetails.filter { key, _ in requests.data.contains { $0.id == key } }
-            for request in requests.data {
-                guard permissionDetails[request.id] == nil, let source = request.source else { continue }
+            for permission in requests.data {
+                PocketNotifications.shared.post(key: "permission|\(captured.server)|\(session.id)|\(permission.id)", title: "Permissão aguardando revisão", body: "Abra Pocket e leia pedido antes de autorizar.")
+                guard permissionDetails[permission.id] == nil, let source = permission.source else { continue }
                 var message = messages.first { $0.id == source.messageID }
                 if message == nil {
                     let full: Item<Message> = try await api.request("/api/session/\(session.id)/message/\(source.messageID)")
+                    guard isCurrent(captured, api: api), currentTicket >= appliedFull else { return }
                     message = full.data
                 }
-                if let input = message?.content?.first(where: { $0.id == source.id })?.state?.input {
-                    permissionDetails[request.id] = input.pretty
-                }
+                if let input = message?.content?.first(where: { $0.id == source.id })?.state?.input { permissionDetails[permission.id] = input.pretty }
             }
-            error = nil
-            applySession(sessionInfo.data, ticket: currentTicket, revision: revision)
-            refreshed = true
-            if !olderPage, api.connected, api.server == refreshedServer {
-                TaskHistory.shared.reconcile(server: refreshedServer, session: sessionInfo.data, messages: page.data, waitingPermission: !permissions.isEmpty, waitingQuestion: !questions.isEmpty)
-            }
-        } catch is CancellationError { }
-        catch let failure as URLError where failure.code == .cancelled { }
-        catch { self.error = ConnectionAdvice.describe(error) }
+            TaskHistory.shared.reconcile(server: captured.server, session: sessionInfo.data, messages: latestPage, waitingPermission: !permissions.isEmpty, waitingQuestion: !questions.isEmpty)
+        } catch {
+            guard isCurrent(captured, api: api) else { return }
+            detailsError = "Histórico carregado; estado ou pendências não confirmados. Tente atualizar."
+        }
     }
 
     func receiveEvent(_ type: String, api: API, session: Session) {
+        open(api, session: session)
         liveConnected = true
         dirty = true
         let lower = type.lowercased()
@@ -135,18 +176,21 @@ final class ChatStore: ObservableObject {
         pump?.cancel()
         pump = nil
         dirty = false
+        fullDirty = false
         liveConnected = false
     }
     private func refreshStreaming(_ api: API, session: Session) async {
+        guard let captured = scope else { return }
         let currentTicket = nextTicket()
         let revision = metadataRevision
         do {
-            let info: Item<Session> = try await api.request("/api/session/\(session.id)")
             let page: Page<Message> = try await api.request("/api/session/\(session.id)/message?limit=5&order=desc&type=assistant")
-            try Task.checkCancellation()
+            guard isCurrent(captured, api: api) else { return }
             applyMessages(page, ticket: currentTicket)
+            let info: Item<Session> = try await api.request("/api/session/\(session.id)")
+            guard isCurrent(captured, api: api) else { return }
             applySession(info.data, ticket: currentTicket, revision: revision)
-        } catch { liveConnected = false }
+        } catch { if isCurrent(captured, api: api) { liveConnected = false } }
     }
     func changeAgent(_ agent: String, api: API, session: Session) async throws -> Session {
         metadataRevision &+= 1
