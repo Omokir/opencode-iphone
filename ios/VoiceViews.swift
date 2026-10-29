@@ -61,6 +61,36 @@ struct VoiceCallView: View {
     @State private var question: QuestionForm?
     var body: some View {
         NavigationStack {
+            Group {
+            if session.isKzL {
+                VStack(spacing: 24) {
+                    Spacer()
+                    Image(systemName: "waveform.circle.fill").font(.system(size: 88)).foregroundStyle(.blue)
+                    Text("Agente KzL").font(.largeTitle.weight(.semibold))
+                    Text(voice.status).font(.title3).multilineTextAlignment(.center)
+                    if voice.open { Text("\(voice.elapsedSeconds / 60):\(String(format: "%02d", voice.elapsedSeconds % 60))").monospacedDigit() }
+                    if let error = voice.error { Text(error).font(.caption).foregroundStyle(.red) }
+                    if !voice.caption.isEmpty { ScrollView { Text(voice.caption).font(.body).textSelection(.enabled) }.frame(maxHeight: 140) }
+                    Text(voice.notebook).font(.caption).foregroundStyle(.secondary)
+                    NavigationLink("Tarefas e resultados") { KzLTasksView() }
+                    Spacer()
+                    if voice.open {
+                        HStack(spacing: 32) {
+                            VStack { AudioRoutePicker().frame(width: 64, height: 64); Text("Áudio").font(.caption) }
+                            Button { voice.end(); dismiss() } label: {
+                                Image(systemName: "phone.down.fill").font(.title).frame(width: 76, height: 76).background(.red, in: Circle()).foregroundStyle(.white)
+                            }.accessibilityLabel("Encerrar ligação")
+                            Button { voice.setMuted(!voice.muted) } label: {
+                                VStack { Image(systemName: voice.muted ? "mic.slash.fill" : "mic.fill").font(.title).frame(width: 64, height: 64); Text(voice.muted ? "Ativar" : "Silenciar").font(.caption) }
+                            }
+                        }
+                    } else {
+                        Button("Ligar", systemImage: "phone.fill") { consent = true }.buttonStyle(.borderedProminent).controlSize(.large)
+                        Text("API paga · ligação em primeiro plano").font(.caption).foregroundStyle(.secondary)
+                    }
+                }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(LinearGradient(colors: [Color.blue.opacity(0.16), Color(uiColor: .systemBackground)], startPoint: .top, endPoint: .bottom))
+            } else {
             List {
                 Section {
                     VStack(spacing: 18) {
@@ -71,7 +101,7 @@ struct VoiceCallView: View {
                             .accessibilityHidden(true)
                         Text(voice.status).font(.title3.weight(.medium)).multilineTextAlignment(.center)
                     }.frame(maxWidth: .infinity).padding(.vertical, 24)
-                    Text("Agente KzL · voz Realtime · execução persistente no notebook").font(.caption).foregroundStyle(.secondary)
+                    Text(session.isKzL ? "Agente KzL · ligação" : "Live · esta conversa").font(.caption).foregroundStyle(.secondary)
                     if voice.open {
                         Text("\(voice.elapsedSeconds / 60):\(String(format: "%02d", voice.elapsedSeconds % 60)) / \(voice.maximumSeconds / 60):00").font(.system(.headline, design: .monospaced)).accessibilityLabel("Duração da chamada")
                         Text(voice.muted ? "Microfone mudo" : "Microfone via WebRTC · sem medidor PCM local").font(.caption)
@@ -92,12 +122,12 @@ struct VoiceCallView: View {
                         }
                         Button("Parar somente fala", systemImage: "speaker.slash") { voice.stopSpeaking() }.disabled(!voice.active)
                     } else {
-                        NavigationLink("Revisar tarefas sem reenviar") { TaskHistoryView() }
-                        Button("Ligar", systemImage: "phone.fill") { consent = true }.disabled(soundTest.running)
+                        Button(session.isKzL ? "Ligar para KzL" : "Iniciar Live", systemImage: session.isKzL ? "phone.fill" : "waveform") { consent = true }.disabled(soundTest.running)
+                        DisclosureGroup("Teste de áudio") {
                         Button(soundTest.running ? "Testando circuito local…" : "Testar som local (sem API)", systemImage: "speaker.wave.2") { Task { await soundTest.run() } }.disabled(soundTest.running)
                         Text("Teste local verifica saída do iOS, não comprova mídia WebRTC. Nada é enviado à rede. Aumente volume pelos botões do iPhone se necessário.").font(.caption).foregroundStyle(.secondary)
                         if !soundTest.result.isEmpty { Text(soundTest.result).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
-                        NavigationLink("Configurar voz") { VoiceSettingsView() }
+                        }
                     }
                     if let error = voice.error { Text(error).font(.caption).foregroundStyle(.red) }
                 }
@@ -124,7 +154,9 @@ struct VoiceCallView: View {
                         ShareLink(item: voice.diagnosticsText) { Label("Compartilhar contadores", systemImage: "square.and.arrow.up") }
                     }
                 }
-             }.listStyle(.insetGrouped).navigationTitle("Conversa por voz").navigationBarTitleDisplayMode(.inline)
+             }.listStyle(.insetGrouped)
+            }
+            }.navigationTitle(session.isKzL ? "Ligação" : "Live da conversa").navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button("Fechar") { voice.end(); dismiss() } }
                 .onDisappear { voice.end(); soundTest.stop() }
                 .onChange(of: phase) { _, value in if value == .background { voice.end(); soundTest.stop() } }
@@ -143,7 +175,7 @@ struct VoiceCallView: View {
                 .confirmationDialog("Iniciar chamada com API paga?", isPresented: $consent, titleVisibility: .visible) {
                     Button("Ligar via OpenCode do notebook") { Task { if !soundTest.running { await voice.start(api, session: session, monitor: monitor) } } }
                     Button("Cancelar", role: .cancel) { }
-                } message: { Text("Microfone e contexto limitado do Agente KzL serão enviados à OpenAI. Transcrição e voz têm cobrança API. Textos serão salvos no notebook, sem gravar áudio. Pedidos claros poderão iniciar tarefas sem confirmação adicional; permissões do OpenCode permanecem. Não diga senhas/códigos. Limite de \(VoiceBudget.minutes(UserDefaults.standard.integer(forKey: "voice.minutes"))) minutos, não monetário.") }
+                } message: { Text(session.isKzL ? "Microfone e contexto do KzL serão enviados à OpenAI; texto de voz é salvo no notebook. API paga. Pedidos podem iniciar tarefas com permissões existentes. Não diga senhas. A ligação ainda encerra em segundo plano nesta versão." : "Live usa contexto e agente desta conversa, sem redirecionar para KzL. Microfone e contexto serão enviados à OpenAI; API paga. Pedidos podem iniciar tarefas com permissões existentes. Não diga senhas. Live encerra em segundo plano.") }
                 .alert("Interromper tarefa no notebook?", isPresented: $interruptTask) {
                     Button("Interromper", role: .destructive) { Task {
                         guard let id = cancellingID else { return }

@@ -21,6 +21,7 @@ final class ChatStore: ObservableObject {
     @Published var showingCache = false
     @Published private(set) var loadingHistory = false
     @Published private(set) var detailsError: String?
+    @Published private(set) var queuedMessageIDs = Set<String>()
     var activity: String {
         if showingCache { return "Histórico salvo · estado atual não confirmado" }
         if !permissions.isEmpty { return "Aguardando permissão" }
@@ -57,6 +58,7 @@ final class ChatStore: ObservableObject {
         scope = next
         messages = []; latestPage = []; permissions = []; questions = []; permissionDetails = [:]
         sessionSnapshot = nil; error = nil; detailsError = nil
+        queuedMessageIDs = []
         refreshed = false; showingCache = false; olderCursor = nil; loadingHistory = false
         messageTickets = [:]; appliedHistory = 0; appliedFull = 0; appliedMetadata = 0
         metadataRevision &+= 1
@@ -132,6 +134,12 @@ final class ChatStore: ObservableObject {
             guard isCurrent(captured, api: api), currentTicket >= appliedFull else { return }
             appliedFull = currentTicket
             permissions = requests.data; questions = questionsPage.data; detailsError = nil
+            struct PendingInbox: Decodable { struct Entry: Decodable { let id: String }; let data: [Entry] }
+            do {
+                let inbox: PendingInbox = try await api.request("/api/session/\(session.id)/inbox")
+                guard isCurrent(captured, api: api) else { return }
+                queuedMessageIDs = Set(inbox.data.map(\.id))
+            } catch { /* Unknown queue state is never presented as confirmed. */ queuedMessageIDs = [] }
             permissionDetails = permissionDetails.filter { key, _ in requests.data.contains { $0.id == key } }
             for permission in requests.data {
                 PocketNotifications.shared.post(key: "permission|\(captured.server)|\(session.id)|\(permission.id)", title: "Permissão aguardando revisão", body: "Abra Pocket e leia pedido antes de autorizar.")

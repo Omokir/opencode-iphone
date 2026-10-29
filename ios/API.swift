@@ -50,6 +50,7 @@ final class API: ObservableObject {
     @Published private(set) var connectionID = UUID()
     private var token: String?
     let transport: URLSession
+    private let eventTransport: URLSession
 
     init() {
         server = UserDefaults.standard.string(forKey: "server") ?? ""
@@ -61,6 +62,7 @@ final class API: ObservableObject {
         configuration.httpShouldSetCookies = false
         configuration.urlCache = nil
         transport = URLSession(configuration: configuration, delegate: PrivateAPITransport(), delegateQueue: nil)
+        eventTransport = URLSession(configuration: configuration, delegate: PrivateAPITransport(), delegateQueue: nil)
         connected = token != nil && !server.isEmpty
     }
 
@@ -133,7 +135,8 @@ final class API: ObservableObject {
         var request = try makeRequest("/phone/session/\(id)/events")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 65
-        let (bytes, response) = try await transport.bytes(for: request)
+        let (bytes, response) = try await eventTransport.bytes(for: request)
+        defer { bytes.task.cancel() }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw PhoneError.message("Atualização ao vivo indisponível; consulta periódica continua.")
         }
@@ -166,7 +169,8 @@ final class API: ObservableObject {
         var request = try makeRequest("/phone/kzl/events?revision=" + Self.escape(revision))
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 20
-        let (bytes, response) = try await transport.bytes(for: request)
+        let (bytes, response) = try await eventTransport.bytes(for: request)
+        defer { bytes.task.cancel() }
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw PhoneError.message("Acompanhamento indisponível.") }
         for try await line in bytes.lines {
             try Task.checkCancellation()
@@ -181,6 +185,7 @@ final class API: ObservableObject {
         transport.getAllTasks { tasks in
             tasks.filter { $0.originalRequest?.value(forHTTPHeaderField: "X-Pocket-Connection-ID") == previousConnection }.forEach { $0.cancel() }
         }
+        eventTransport.getAllTasks { tasks in tasks.forEach { $0.cancel() } }
         Vault.clear()
         token = nil
         connected = false

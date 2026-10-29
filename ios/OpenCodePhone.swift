@@ -262,15 +262,21 @@ struct ConnectView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                         Menu {
-                            Button("Ajustes", systemImage: "gearshape") { settings = true }
+                            Section("Trabalho") {
                             Button("Atividade e pendências", systemImage: "tray") { pendingActivity = true }
-                            Button("Arquivos do notebook", systemImage: "folder") { fileBrowser = true }
-                            Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
                             Button("Tarefas deste iPhone", systemImage: "checklist") { taskHistory = true }
-                            Button("Central de transferências", systemImage: "arrow.up.arrow.down") { transferCenter = true }
                             Button("Projetos favoritos", systemImage: "star") { projectPicker = true }
+                            }
+                            Section("Arquivos") {
+                            Button("Explorar notebook", systemImage: "folder") { fileBrowser = true }
+                            Button("Transferências", systemImage: "arrow.up.arrow.down") { transferCenter = true }
                             Button("Pasta automática do iPhone", systemImage: "arrow.up.doc") { inboxSettings = true }
+                            }
+                            Section("Aplicativo") {
+                            Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
+                            Button("Ajustes", systemImage: "gearshape") { settings = true }
                             Button("Controlar meu iPhone (USB)", systemImage: "cable.connector") { phoneControl = true }
+                            }
                         } label: { Image(systemName: "line.3.horizontal") }.accessibilityLabel("Menu do Pocket")
                 }
                 ToolbarItem(placement: .topBarTrailing) { Button("Nova conversa", systemImage: "square.and.pencil") { create = true } }
@@ -489,6 +495,7 @@ struct ConnectView: View {
     @Environment(\.scenePhase) var phase
     @State private var session: Session
     @StateObject private var store = ChatStore()
+    @ObservedObject private var taskHistory = TaskHistory.shared
     @State private var draft = ""
     @State private var stop = false
     @State private var options = false
@@ -548,6 +555,14 @@ struct ConnectView: View {
                     .font(.caption).padding(.vertical, 4)
             }
             connectionStrip
+            ForEach(taskHistory.records.filter { record in
+                record.sessionID == session.id && record.serverKey == TaskHistory.serverKey(api.server) &&
+                !store.messages.contains(where: { $0.id == record.requestID }) &&
+                ["sending", "admitted", "uncertain"].contains(record.state)
+            }.prefix(3)) { record in
+                Text(store.queuedMessageIDs.contains(record.requestID) ? "Mensagem na fila do notebook" : TaskHistory.label(record.state))
+                    .font(.caption).foregroundStyle(record.state == "uncertain" ? Color.orange : .secondary).padding(.horizontal)
+            }
             if showChatSearch {
                 TextField("Buscar nas mensagens carregadas", text: $chatQuery).textFieldStyle(.roundedBorder).padding(.horizontal)
             }
@@ -613,7 +628,7 @@ struct ConnectView: View {
     private var messageTimeline: some View {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 20) {
                         if store.olderCursor != nil {
                             Button("Mensagens anteriores") {
                                 Task {
@@ -625,7 +640,14 @@ struct ConnectView: View {
                         }
                         ForEach(timelineMessages.filter { message in
                             chatQuery.isEmpty || ([message.text ?? ""] + (message.content ?? []).compactMap(\.text)).joined(separator: "\n").localizedCaseInsensitiveContains(chatQuery)
-                        }) { message in MessageView(message: message, assistantLabel: session.isKzL ? "AGENTE KZL" : "OPENCODE").id(message.id) }
+                        }) { message in
+                            VStack(alignment: .leading, spacing: 4) {
+                                MessageView(message: message, assistantLabel: session.isKzL ? "AGENTE KZL" : "OPENCODE")
+                                if message.type == "user", let record = taskHistory.records.first(where: { $0.requestID == message.id && $0.sessionID == session.id && $0.serverKey == TaskHistory.serverKey(api.server) }) {
+                                    Text(store.queuedMessageIDs.contains(message.id) ? "Na fila do notebook" : TaskHistory.label(record.state)).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }.id(message.id)
+                        }
                         if timelineMessages.isEmpty && store.refreshed {
                             ContentUnavailableView("Converse com notebook", systemImage: "text.bubble", description: Text("Envie tarefa para começar."))
                         } else if timelineMessages.isEmpty && store.loadingHistory {
@@ -643,7 +665,6 @@ struct ConnectView: View {
                 }
                 .coordinateSpace(name: "chat-scroll")
                 .background(GeometryReader { geometry in Color.clear.preference(key: ChatHeightPreference.self, value: geometry.size.height) })
-                .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
                 .modifier(ChatScrollInteraction(state: $scroll))
                 .onPreferenceChange(ChatHeightPreference.self) { _ in scheduleFollow(proxy) }
@@ -869,7 +890,13 @@ struct ConnectView: View {
     }
     private var lifecycleContent: some View {
         presentationContent
-        .onAppear { store.open(api, session: session); restoreDraft() }
+        .onAppear {
+            store.open(api, session: session); restoreDraft()
+            Task { await store.refresh(api, session: session) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            Task { await store.refresh(api, session: session) }
+        }
         .onDisappear { followTask?.cancel(); draftSaveTask?.cancel(); saveDraft(); store.stopLiveUpdates() }
         .onChange(of: draft) { _, _ in scheduleDraft() }
         .onChange(of: attachments.map(\.id)) { _, _ in scheduleDraft() }
