@@ -369,7 +369,7 @@ class KzL:
         agents = self.request('GET', '/api/agent' + query)
         # Deliberate allowlist: never forward config, prompts, headers or raw errors.
         return {'servers': [{'name': str(s.get('name', ''))[:120],
-                             'connected': s.get('status', {}).get('type') == 'connected'} for s in (servers or [])[:100]],
+                             'connected': s.get('status', {}).get('status') == 'connected'} for s in (servers or [])[:100]],
                 'agents': [{'id': a['id'], 'name': str(a.get('name', ''))[:120]} for a in (agents or [])[:40] if not a.get('hidden')],
                 'agent': parent.get('agent'), 'directory': parent['location']['directory'],
                 'toolCatalogComplete': False,

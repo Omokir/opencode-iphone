@@ -23,8 +23,8 @@ class Core:
             self.messages[body['id']] = []
             result = self.sessions[body['id']]
         elif path == '/api/mcp':
-            result = [{'name': 'fixture', 'status': {'type': 'connected'}, 'headers': {'secret': 'never-return'}},
-                      {'name': 'offline', 'status': {'type': 'failed', 'error': 'never-return'}}]
+            result = [{'name': 'fixture', 'status': {'status': 'connected'}, 'headers': {'secret': 'never-return'}},
+                      {'name': 'offline', 'status': {'status': 'failed', 'error': 'never-return'}}]
         elif path == '/api/agent':
             result = [{'id': 'plan', 'name': 'Plan', 'hidden': False, 'system': 'never-return'}]
         else:
