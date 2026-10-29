@@ -25,6 +25,7 @@ from read_markers import read_markers
 from resume import ResumableInbox
 from inbox import PhoneInbox
 from storage import storage_status
+from kzl import KzL, KzLError
 
 STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
@@ -41,10 +42,12 @@ RULES = {
     'GET': [r'/api/info', r'/api/experimental/voice/models', r'/api/session', r'/api/session/active', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
             r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices', r'/phone/power/status',
-            r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)'],
+             r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)',
+             r'/phone/kzl/(context|tasks|capabilities|memory|events)'],
     'POST': [r'/api/experimental/voice/session', r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
-             r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)', r'/phone/session/read-state'],
+              r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)', r'/phone/session/read-state',
+              r'/phone/kzl/(ensure|submit|turn)', r'/phone/kzl/task/job_[A-Za-z0-9_-]+/(cancel|update)'],
     'PATCH': [r'/api/session/ses[^/]+'],
 }
 
@@ -189,6 +192,39 @@ def mobile_history_path(path):
     return path
 
 
+def watch_kzl_events(coordinator):
+    """Live invalidations only; periodic coordinator reconciliation covers gaps."""
+    while not coordinator.closed.is_set():
+        try:
+            ids = {job['child'] for job in coordinator.jobs() if job['state'] not in coordinator.terminal}
+        except KzLError:
+            ids = set()
+        if not ids:
+            coordinator.closed.wait(5)
+            continue
+        try:
+            request = core_request('GET', '/api/event')
+            request.add_header('Accept', 'text/event-stream')
+            with urllib.request.urlopen(request, timeout=15) as response:
+                data, size = [], 0
+                started = time.monotonic()
+                while not coordinator.closed.is_set() and time.monotonic() - started < 50:
+                    line = response.readline(262145)
+                    if not line:
+                        break
+                    if not line.strip():
+                        if size <= 262144 and any(session_hint('\n'.join(data), sid) for sid in ids):
+                            coordinator.changed.set()
+                        data, size = [], 0
+                    elif line.startswith(b'data:'):
+                        size += len(line)
+                        if size <= 262144:
+                            data.append(line[5:].decode('utf-8', 'replace').strip())
+        except Exception:
+            pass  # No raw Core events or authentication details in logs.
+        coordinator.closed.wait(1)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # No URLs, prompts, tokens or response content in access logs.
@@ -254,6 +290,7 @@ class Handler(BaseHTTPRequestHandler):
             maximum = self.server.files.max_bytes if path in ('/phone/files/upload', '/phone/inbox/upload') else MAX_BODY
             if path == '/phone/session/read-state': maximum = 16384
             if path == '/api/experimental/voice/session': maximum = 256 * 1024
+            if path.startswith('/phone/kzl/'): maximum = 64 * 1024
             if length < 0 or (path != '/phone/inbox/upload' and length > maximum) or self.headers.get('Transfer-Encoding'):
                 return self.reply(413, {'error': 'Request too large'})
             self.connection.settimeout(10)
@@ -270,6 +307,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(401, {'error': 'Pareie novamente no notebook.'})
             if not allowed(self.command, path):
                 return self.reply(403, {'error': 'Route not available to mobile client'})
+            if path == '/phone/kzl/events':
+                if not STREAM_SLOTS.acquire(blocking=False):
+                    return self.reply(429, {'error': 'Muitas conexões de atualização.'})
+                try:
+                    query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                    previous = query.get('revision', [''])[0]
+                    if len(previous) > 8192:
+                        return self.reply(400, {'error': 'Revisão inválida.'})
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/event-stream')
+                    self.send_header('Cache-Control', 'no-store')
+                    self.send_header('Connection', 'close')
+                    self.end_headers()
+                    started = time.monotonic()
+                    while time.monotonic() - started < 12:
+                        jobs = self.server.kzl.jobs()
+                        revision = '|'.join(sorted(j['id'] + ':' + str(j['revision']) for j in jobs))
+                        if revision != previous:
+                            break
+                        time.sleep(0.4)
+                    self.wfile.write(b'data: {"type":"changed"}\n\n')
+                    self.wfile.flush()
+                    self.close_connection = True
+                    return
+                finally:
+                    STREAM_SLOTS.release()
             search = re.fullmatch(r'/phone/session/(ses[^/]+)/search', path)
             if search:
                 query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
@@ -368,6 +431,28 @@ class Handler(BaseHTTPRequestHandler):
                         self.headers.get('X-Upload-ID', ''), self.headers.get('X-Content-SHA256', ''), expected)
                     return self.reply(200, result)
             body = self.rfile.read(length) if length else None
+            if path.startswith('/phone/kzl/'):
+                coordinator = self.server.kzl
+                if path == '/phone/kzl/ensure':
+                    return self.reply(200, {'data': coordinator.ensure()})
+                if path == '/phone/kzl/context':
+                    return self.reply(200, coordinator.context())
+                if path == '/phone/kzl/memory':
+                    return self.reply(200, coordinator.memory())
+                if path == '/phone/kzl/capabilities':
+                    return self.reply(200, coordinator.capabilities())
+                if path == '/phone/kzl/tasks':
+                    return self.reply(200, {'tasks': coordinator.jobs()})
+                payload = json.loads(body or b'{}')
+                if path == '/phone/kzl/submit':
+                    return self.reply(200, coordinator.submit(payload, current_device))
+                if path == '/phone/kzl/turn':
+                    return self.reply(200, coordinator.remember(payload))
+                task = re.fullmatch(r'/phone/kzl/task/(job_[A-Za-z0-9_-]+)/(cancel|update)', path)
+                if task:
+                    if task[2] == 'cancel':
+                        return self.reply(200, coordinator.cancel(task[1]))
+                    return self.reply(200, coordinator.update(task[1], payload.get('text'), payload.get('id')))
             if path == '/api/experimental/voice/session':
                 payload = json.loads(body or b'{}')
                 media = payload.get('transport', {})
@@ -444,7 +529,7 @@ class Handler(BaseHTTPRequestHandler):
             if status == 200 and self.command == 'GET' and re.fullmatch(r'/api/session/ses[^/]+/message(?:/msg[^/]+)?', path):
                 result = mobile_messages(result)
             return self.reply(status, result)
-        except FileError as error:
+        except (FileError, KzLError) as error:
             self.reply(error.status, error.body)
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -467,5 +552,8 @@ if __name__ == '__main__':
     server.inbox = PhoneInbox(STATE)
     server.resumable = ResumableInbox(server.inbox)
     server.power = NotebookPower()
+    server.kzl = KzL(STATE, upstream, session_defaults)
+    server.kzl.start()
+    threading.Thread(target=watch_kzl_events, args=(server.kzl,), daemon=True).start()
     server.daemon_threads = True
     server.serve_forever()

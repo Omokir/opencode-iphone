@@ -70,8 +70,9 @@ struct Session: Decodable, Identifiable, Hashable {
         return time?.idle
     }
     let metadata: Metadata?
-    struct Metadata: Decodable, Equatable { let phoneControl: Bool? }
+    struct Metadata: Decodable, Equatable { let phoneControl: Bool?; let kzlAgent: Bool? }
     var isPhoneControl: Bool { metadata?.phoneControl == true }
+    var isKzL: Bool { metadata?.kzlAgent == true }
     struct Location: Decodable, Equatable { let directory: String }
     struct Model: Decodable, Equatable {
         let providerID: String

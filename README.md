@@ -16,6 +16,8 @@ History ordering: [0.9.1 shared notebook activity order and sync boundaries](doc
 
 Conversation indicators: [0.9.2 shared computer reads and running status](docs/SESSION-INDICATORS.md).
 
+Persistent voice agent: [Agente KzL architecture, usage and limitations](docs/AGENTE-KZL.md).
+
 ## Included
 
 - Existing sessions, new sessions in a notebook directory, paged history.

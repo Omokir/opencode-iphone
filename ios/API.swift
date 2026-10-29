@@ -162,6 +162,18 @@ final class API: ObservableObject {
         }
     }
 
+    func watchKzL(revision: String, changed: @MainActor () -> Void) async throws {
+        var request = try makeRequest("/phone/kzl/events?revision=" + Self.escape(revision))
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 20
+        let (bytes, response) = try await transport.bytes(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw PhoneError.message("Acompanhamento indisponível.") }
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            if line.hasPrefix("data:") { changed(); return }
+        }
+    }
+
     func disconnect() {
         BackgroundInbox.shared.cancelAll()
         let previousConnection = connectionID.uuidString

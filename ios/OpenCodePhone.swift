@@ -148,6 +148,9 @@ struct ConnectView: View {
     @State private var activeGeneration = UUID()
     @State private var activeExpiry: Task<Void, Never>?
     @State private var markerOffset = 0
+    @State private var kzl: Session?
+    @State private var kzlError: String?
+    @State private var kzlBusy = false
     var searching: Bool { !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var displayedSessions: [Session] {
         SessionActivityOrder.sorted(searching ? searchResults : sessions).filter { session in
@@ -159,11 +162,31 @@ struct ConnectView: View {
         }
     }
     var displayedPins: [String] { searching || listFilter != "Todas" ? pinnedIDs.filter { id in displayedSessions.contains { $0.id == id } } : pinnedIDs }
-    var pinnedIDs: [String] { pins.ids(server: api.server) }
-    var otherSessions: [Session] { displayedSessions.filter { !pins.contains($0.id, server: api.server) } }
+    var pinnedIDs: [String] { pins.ids(server: api.server).filter { id in id != kzl?.id && !sessions.contains(where: { $0.id == id && $0.isKzL }) } }
+    var otherSessions: [Session] { displayedSessions.filter { !$0.isKzL && $0.id != kzl?.id && !pins.contains($0.id, server: api.server) } }
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                Section {
+                    if let kzl {
+                        NavigationLink(value: kzl) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "waveform.circle.fill").font(.largeTitle).foregroundStyle(Style.blue)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Agente KzL").font(.headline)
+                                    Text("Conversa permanente · voz, texto e tarefas").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                if runningIDs.contains(kzl.id) { Image(systemName: "gearshape.fill").foregroundStyle(.green) }
+                            }.padding(.vertical, 4)
+                        }.accessibilityIdentifier("kzl.permanent-chat")
+                    } else {
+                        Button { Task { await loadKzL() } } label: {
+                            Label(kzlBusy ? "Abrindo Agente KzL…" : "Agente KzL · conectar", systemImage: "waveform.circle")
+                        }.disabled(kzlBusy)
+                    }
+                    if let kzlError { Text(kzlError).font(.caption).foregroundStyle(.secondary) }
+                }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 Section {
                     DisclosureGroup(isExpanded: $dashboardExpanded) {
@@ -247,10 +270,13 @@ struct ConnectView: View {
             .overlay { if busy && sessions.isEmpty { ProgressView() } }
             .refreshable { await load(resetPagination: true) }
             .onAppear {
+                if kzl == nil, let id = UserDefaults.standard.string(forKey: "kzl.session." + HistoryCache.key(api.server)),
+                   let item: Item<Session> = api.cached("/api/session/" + id) { kzl = item.data }
                 if sessions.isEmpty, let page: Page<Session> = api.cached("/api/session?limit=30&archived=false&parentID=null&order=desc") {
                     sessions = page.data; cursor = page.cursor?.next; cachedList = true
                 }
             }
+            .task(id: api.server) { await loadKzL() }
             .task(id: phase) {
                 guard phase == .active else { return }
                 while !Task.isCancelled {
@@ -278,6 +304,19 @@ struct ConnectView: View {
                 Button("Cancelar", role: .cancel) { }
             } message: { Text("Use caminho absoluto da pasta onde OpenCode vai trabalhar.") }
         }
+    }
+    func loadKzL() async {
+        guard !kzlBusy else { return }
+        kzlBusy = true
+        defer { kzlBusy = false }
+        let server = api.server; let connection = api.connectionID
+        do {
+            let item: Item<Session> = try await api.request("/phone/kzl/ensure", method: "POST", body: [:])
+            guard api.connected, api.server == server, api.connectionID == connection, !Task.isCancelled else { return }
+            kzl = item.data; kzlError = nil
+            UserDefaults.standard.set(item.data.id, forKey: "kzl.session." + HistoryCache.key(server))
+            let _: Item<Session> = try await api.request("/api/session/" + item.data.id)
+        } catch { kzlError = "Agente KzL não confirmou conexão. Histórico não será substituído. " + error.localizedDescription }
     }
     func row(_ session: Session, pinned: Bool) -> some View {
         ConversationRow(session: session, pinned: pinned, unread: unread.isUnread(session, server: api.server), running: phase == .active && api.reachable != false && runningIDs.contains(session.id)) {
@@ -457,6 +496,9 @@ struct ConnectView: View {
     @State private var showChatSearch = false
     @State private var showFullSearch = false
     @State private var voiceCall = false
+    @State private var kzlActivity = false
+    @State private var kzlVoiceMessages: [Message] = []
+    @State private var kzlResultMessages: [Message] = []
     @State private var visibleMessage: String?
     @State private var restoredPosition = false
     private let drafts = DraftStore()
@@ -467,10 +509,21 @@ struct ConnectView: View {
         #endif
     }
     var body: some View { lifecycleContent }
+    private var timelineMessages: [Message] {
+        guard session.isKzL else { return store.messages }
+        func stamp(_ message: Message) -> Double { message.time.created > 100_000_000_000 ? message.time.created / 1000 : message.time.created }
+        return (store.messages + kzlVoiceMessages + kzlResultMessages).sorted {
+            stamp($0) == stamp($1) ? $0.id < $1.id : stamp($0) < stamp($1)
+        }
+    }
     private var chatContent: some View {
         VStack(spacing: 0) {
             controlHeader
             modeHeader
+            if session.isKzL {
+                Button("Tarefas e histórico de voz", systemImage: "checklist") { kzlActivity = true }
+                    .font(.caption).padding(.vertical, 4)
+            }
             connectionStrip
             Text(store.activity).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
             if showChatSearch {
@@ -542,10 +595,10 @@ struct ConnectView: View {
                                 }
                             }.disabled(store.loadingOlder)
                         }
-                        ForEach(store.messages.filter { message in
+                        ForEach(timelineMessages.filter { message in
                             chatQuery.isEmpty || ([message.text ?? ""] + (message.content ?? []).compactMap(\.text)).joined(separator: "\n").localizedCaseInsensitiveContains(chatQuery)
-                        }) { message in MessageView(message: message).id(message.id) }
-                        if store.messages.isEmpty && store.refreshed {
+                        }) { message in MessageView(message: message, assistantLabel: session.isKzL ? "AGENTE KZL" : "OPENCODE").id(message.id) }
+                        if timelineMessages.isEmpty && store.refreshed {
                             ContentUnavailableView("Converse com notebook", systemImage: "text.bubble", description: Text("Envie tarefa para começar."))
                         }
                         Color.clear.frame(height: 1).id("bottom").background(GeometryReader { geometry in
@@ -566,10 +619,10 @@ struct ConnectView: View {
                     bottomY = value
                     if !scrollInteracting && value <= viewportHeight + 80 { following = true }
                 }
-                .onChange(of: store.renderRevision) { _, _ in
-                    if !restoredPosition, !store.messages.isEmpty {
+                .onChange(of: "\(store.renderRevision)-\(kzlVoiceMessages.count)-\(kzlResultMessages.count)") { _, _ in
+                    if !restoredPosition, !timelineMessages.isEmpty {
                         restoredPosition = true
-                        if let saved = UserDefaults.standard.string(forKey: "chat.position." + HistoryCache.key(api.server + "|" + session.id)), store.messages.contains(where: { $0.id == saved }) {
+                        if let saved = UserDefaults.standard.string(forKey: "chat.position." + HistoryCache.key(api.server + "|" + session.id)), timelineMessages.contains(where: { $0.id == saved }) {
                             following = false; proxy.scrollTo(saved, anchor: .top); return
                         }
                     }
@@ -679,7 +732,7 @@ struct ConnectView: View {
     }
     private var navigationContent: some View {
         chatContent
-        .navigationTitle(session.title ?? "Conversa").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(session.isKzL ? "Agente KzL" : session.title ?? "Conversa").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { Button("Ligar por voz", systemImage: "phone") { voiceCall = true } }
             ToolbarItem(placement: .topBarTrailing) {
@@ -697,6 +750,25 @@ struct ConnectView: View {
         .sheet(isPresented: $controlPanel) { PhoneControlView() }
         .sheet(isPresented: $showFullSearch) { FullChatSearchView(sessionID: session.id) }
         .sheet(isPresented: $voiceCall) { VoiceCallView(session: session) }
+        .sheet(isPresented: $kzlActivity) { NavigationStack { KzLTasksView().toolbar { Button("Fechar") { kzlActivity = false } } } }
+        .task(id: "kzl-\(phase)-\(session.id)") {
+            guard phase == .active, session.isKzL else { return }
+            if let memory: KzLMemory = api.cached("/phone/kzl/memory") { kzlVoiceMessages = memory.turns.map(\.message) }
+            while !Task.isCancelled {
+                let server = api.server; let connection = api.connectionID
+                do {
+                    let memory: KzLMemory = try await api.request("/phone/kzl/memory")
+                    let jobs: KzLTaskList = try await api.request("/phone/kzl/tasks")
+                    guard api.connected, api.server == server, api.connectionID == connection, !Task.isCancelled else { return }
+                    kzlVoiceMessages = memory.turns.map(\.message)
+                    kzlResultMessages = jobs.tasks.filter(\.terminal).map { task in
+                        Message(id: "kzl-result-" + task.id, type: "assistant", text: task.label + " · " + task.text + "\n" + task.result,
+                                content: nil, time: .init(created: task.updated, completed: task.updated), error: nil, files: nil)
+                    }
+                } catch { /* Last confirmed text stays visible; never repeats work. */ }
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            }
+        }
         .sheet(isPresented: $fileBrowser) { FileBrowserView(initialDirectory: session.location.directory) }
         .sheet(item: $preview) { FilePreviewView(file: $0) }
         .sheet(item: $question) { form in
@@ -845,10 +917,11 @@ struct ConnectView: View {
 
 struct MessageView: View {
     let message: Message
+    var assistantLabel = "OPENCODE"
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(message.type == "user" ? "VOCÊ" : "OPENCODE").font(.system(.caption2, design: .monospaced, weight: .bold)).foregroundStyle(Style.blue)
+                Text(message.type == "user" ? "VOCÊ" : assistantLabel).font(.system(.caption2, design: .monospaced, weight: .bold)).foregroundStyle(Style.blue)
                 Spacer()
                 if message.type == "assistant" && message.time.completed == nil { ProgressView().controlSize(.mini).accessibilityLabel("Em execução") }
             }

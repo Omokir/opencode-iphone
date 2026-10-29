@@ -4,6 +4,24 @@ Cliente nativo para acessar **OpenCode V2 já rodando no computador**. Não exec
 OpenCode no iPhone. Requer iOS 17+, computador Linux ligado, Python 3, OpenCode V2
 com serviço gerenciado e Tailscale nos dois aparelhos. Projeto independente.
 
+## Agente KzL (0.11.0)
+
+- Entrada permanente no topo, separada das conversas fixadas comuns.
+- Voz e texto compartilham histórico; ligações novas recebem contexto recente
+  limitado. Fechar app ou atualizar não cria outra identidade.
+- Pedidos claros por voz são delegados sem confirmação extra do Pocket. O
+  OpenCode mantém modelo, agente (inclusive Plan), login e permissões existentes.
+- Tarefas ficam na fila do notebook, com conversa própria e resultado identificado.
+  Use **Tarefas e histórico de voz** ou **Abrir tarefa** para acompanhar, responder
+  perguntas e revisar permissões. Falar por cima não cancela execução.
+- Realtime recebe estado real dos MCPs, não credenciais nem promessa de controle
+  irrestrito. Catálogo completo de ferramentas ainda não é exposto à voz.
+- Voz e transcrição usam API paga. Texto de voz é salvo no notebook; áudio não
+  é gravado pelo Pocket. Não dite senhas ou códigos. Nenhuma permissão do sistema
+  é removida, e não há sudo irrestrito.
+- Se ligação cair, tarefas continuam. Não repita tarefa de resultado incerto;
+  confira a conversa vinculada. Veja [arquitetura e limites](AGENTE-KZL.md).
+
 ## 1. Preparar computador
 
 Instale OpenCode V2 conforme documentação oficial: https://opencode.ai/v2/docs/.

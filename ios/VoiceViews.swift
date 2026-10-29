@@ -33,7 +33,7 @@ struct VoiceSettingsView: View {
                 }
                 Text("Aumentar saída pode aumentar custo; não é correção comprovada de áudio. Uso de raciocínio também pode consumir orçamento antes de voz. Não há ajuste automático.").font(.caption).foregroundStyle(.secondary)
                 Text("API Realtime tem cobrança separada da assinatura ChatGPT e do provedor usado pelo OpenCode. Áudio sai do iPhone durante chamada; consultas da ferramenta podem enviar texto recente desta conversa à OpenAI.").font(.caption)
-                Text("Sem gravação local de áudio ou transcrição persistida. Chamada encerra ao sair do painel, entrar em segundo plano, bloquear aparelho ou perder conexão. Limite configurável entre 1 e 15 minutos; não é limite monetário garantido.").font(.caption)
+                Text("Áudio não é gravado pelo Pocket. Transcrição de entrada usa API e pode ter custo adicional; textos e tarefas ficam no histórico privado do Agente KzL no notebook. Contexto entre chamadas é limitado. Chamada encerra em segundo plano ou ao sair do painel; tarefas continuam. Limite de tempo não é limite monetário garantido.").font(.caption)
             }
             if let notice { Text(notice).font(.caption).foregroundStyle(.secondary) }
         }.navigationTitle("Voz")
@@ -56,6 +56,8 @@ struct VoiceCallView: View {
     @StateObject private var soundTest = VoiceSoundTest()
     @State private var consent = false
     @State private var interruptTask = false
+    @State private var cancellingID: String?
+    @State private var taskToReview: KzLTask?
     @State private var question: QuestionForm?
     var body: some View {
         NavigationStack {
@@ -63,7 +65,7 @@ struct VoiceCallView: View {
                 Section {
                     Label(voice.status, systemImage: voice.open ? "waveform.circle.fill" : "phone.circle")
                         .font(.title3.weight(.semibold)).foregroundStyle(voice.active ? Color.green : Style.blue)
-                    Text("Voz: OpenAI Realtime · execução: OpenCode do notebook").font(.caption).foregroundStyle(.secondary)
+                    Text("Agente KzL · voz Realtime · execução persistente no notebook").font(.caption).foregroundStyle(.secondary)
                     if voice.open {
                         Text("\(voice.elapsedSeconds / 60):\(String(format: "%02d", voice.elapsedSeconds % 60)) / \(voice.maximumSeconds / 60):00").font(.system(.headline, design: .monospaced)).accessibilityLabel("Duração da chamada")
                         Text(voice.muted ? "Microfone mudo" : "Microfone via WebRTC · sem medidor PCM local").font(.caption)
@@ -85,26 +87,21 @@ struct VoiceCallView: View {
                     }
                     if let error = voice.error { Text(error).font(.caption).foregroundStyle(.red) }
                 }
-                if !voice.caption.isEmpty { Section("Legenda da voz · somente nesta chamada") { Text(voice.caption).textSelection(.enabled) } }
-                if let call = voice.pending {
-                    Section("Confirmar tarefa no notebook") {
-                        Text(call.task ?? "").font(.body).textSelection(.enabled)
-                        Text("Só este texto será enviado à conversa atual. Login/modelo e permissões do OpenCode não serão alterados.").font(.caption)
-                        Button("Confirmar envio ao OpenCode") { Task { if await privacy.confirm("Enviar tarefa de voz ao notebook") { await voice.approve(call, api: api, session: session, monitor: monitor) } } }
-                        Button("Negar proposta", role: .cancel) { voice.deny() }
-                        Text("Nova fala antes de confirmar cancela esta proposta, evitando enviar instrução antiga.").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
+                if !voice.caption.isEmpty { Section("Legenda · texto salvo no notebook quando confirmado") { Text(voice.caption).textSelection(.enabled) } }
                 Section("Notebook") {
                     Text(voice.notebook).font(.caption)
-                    ForEach(monitor.permissions) { permission in
-                        PermissionCard(permission: permission, details: monitor.permissionDetails[permission.id], strict: true) { decision in
-                            await monitor.reply(api, session: session, permission: permission, decision: decision)
+                    if let issue = voice.taskSyncIssue { Text(issue).font(.caption).foregroundStyle(.orange) }
+                    if let issue = voice.memoryNotice { Text(issue).font(.caption).foregroundStyle(.orange) }
+                    ForEach(voice.tasks.prefix(12)) { task in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(task.text).font(.subheadline).lineLimit(2)
+                            Text(task.label).font(.caption.weight(.semibold)).foregroundStyle(task.state == "waiting" ? Color.orange : Style.blue)
+                            if !task.result.isEmpty { Text(task.result).font(.caption).lineLimit(3) }
+                            Button(task.state == "waiting" ? "Revisar permissão ou pergunta" : "Abrir tarefa") { voice.setMuted(true); taskToReview = task }
+                            if task.canCancel { Button("Interromper esta tarefa", role: .destructive) { cancellingID = task.id; interruptTask = true } }
                         }
                     }
-                    ForEach(monitor.questions) { form in Button(form.title) { voice.setMuted(true); question = form } }
-                    Button("Interromper tarefa no notebook", role: .destructive) { interruptTask = true }.disabled(!api.connected)
-                    Text("Falar por cima e Encerrar param voz, não tarefa já admitida. Consulte conversa antes de repetir envio incerto.").font(.caption).foregroundStyle(.secondary)
+                    Text("Pedidos claros são delegados sem confirmação extra do Pocket. Permissões do OpenCode permanecem. Falar por cima e Encerrar param voz, não trabalho já enviado.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
                     Text(voice.usageText).font(.caption).textSelection(.enabled)
@@ -128,14 +125,19 @@ struct VoiceCallView: View {
                     }
                 }
                 .sheet(item: $question) { form in QuestionFormView(question: form, session: session) { Task { await monitor.refresh(api, session: session) } } }
+                .sheet(item: $taskToReview) { task in NavigationStack { KzLTaskDestination(id: task.child).toolbar { Button("Voltar à ligação") { taskToReview = nil } } } }
                 .confirmationDialog("Iniciar chamada com API paga?", isPresented: $consent, titleVisibility: .visible) {
-                    Button("Ligar via OpenCode do notebook") { Task { if await privacy.confirm("Iniciar conversa de voz com OpenAI Realtime"), !soundTest.running { await voice.start(api, session: session, monitor: monitor) } } }
+                    Button("Ligar via OpenCode do notebook") { Task { if !soundTest.running { await voice.start(api, session: session, monitor: monitor) } } }
                     Button("Cancelar", role: .cancel) { }
-                } message: { Text("Microfone será transmitido à OpenAI. Texto recente desta conversa pode ser compartilhado com Realtime por ferramenta. Cobrança separada; limite de \(VoiceBudget.minutes(UserDefaults.standard.integer(forKey: "voice.minutes"))) minutos, sem garantia de valor máximo. Não diga senhas/códigos. Nenhuma tarefa será enviada sem confirmação visual.") }
+                } message: { Text("Microfone e contexto limitado do Agente KzL serão enviados à OpenAI. Transcrição e voz têm cobrança API. Textos serão salvos no notebook, sem gravar áudio. Pedidos claros poderão iniciar tarefas sem confirmação adicional; permissões do OpenCode permanecem. Não diga senhas/códigos. Limite de \(VoiceBudget.minutes(UserDefaults.standard.integer(forKey: "voice.minutes"))) minutos, não monetário.") }
                 .alert("Interromper tarefa no notebook?", isPresented: $interruptTask) {
-                    Button("Interromper", role: .destructive) { Task { if await privacy.confirm("Interromper tarefa no notebook") { await monitor.interrupt(api, session: session) } } }
+                    Button("Interromper", role: .destructive) { Task {
+                        guard let id = cancellingID else { return }
+                        do { let _: KzLTask = try await api.request("/phone/kzl/task/\(id)/cancel", method: "POST", body: [:]) }
+                        catch { voice.error = "Interrupção não confirmada; confira tarefa antes de repetir." }
+                    } }
                     Button("Cancelar", role: .cancel) { }
-                } message: { Text("Solicita interrupção à conversa atual; não desfaz ações já realizadas.") }
+                } message: { Text("Solicita interrupção somente da tarefa selecionada; não desfaz ações já realizadas.") }
         }
     }
 }

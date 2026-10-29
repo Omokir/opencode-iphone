@@ -16,7 +16,15 @@ import Foundation
         precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_status", arguments: #"{"path":"/api/config"}"#)).isEmpty)
         let session = RealtimeProtocol.configuration(model: "gpt-realtime", voice: "marin")
         precondition(session["type"] as? String == "realtime")
-        precondition((session["tools"] as? [[String: Any]])?.count == 2)
+        precondition((session["tools"] as? [[String: Any]])?.count == 5)
+        precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_capabilities", arguments: "{}")).count == 1)
+        precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_cancel", arguments: #"{"jobID":"job_abc"}"#)).first?.jobID == "job_abc")
+        precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_update", arguments: #"{"jobID":"job_abc","task":"Read only"}"#)).first?.task == "Read only")
+        precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_cancel", arguments: #"{"jobID":"job_../../secret"}"#)).isEmpty)
+        precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_update", arguments: #"{"jobID":"job_abc","task":"Read only","permissions":"allow"}"#)).isEmpty)
+        let completedItem: [String: Any] = ["type": "response.output_item.done", "item": ["type": "function_call", "status": "completed", "call_id": "call_early", "name": "opencode_submit", "arguments": #"{"task":"Inspect fixture"}"#]]
+        precondition(RealtimeProtocol.completedTools(completedItem).first?.task == "Inspect fixture")
+        precondition(!(session["instructions"] as! String).contains("sempre aguarde confirmação visual"))
         let samples: [Float] = [-2, -1, 0, 1, 2, .nan, .infinity]
         let data = samples.withUnsafeBufferPointer { RealtimePCM.encode($0) }
         let decoded = RealtimePCM.decode(data)!

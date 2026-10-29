@@ -28,6 +28,7 @@ class GatewayTests(unittest.TestCase):
         self.http.inbox = server.PhoneInbox(self.state / 'inbox-state', home=self.state)
         self.http.resumable = server.ResumableInbox(self.http.inbox)
         self.http.power = server.NotebookPower(run=lambda args, **kwargs: subprocess.CompletedProcess(args, 1, '', ''))
+        self.http.kzl = server.KzL(self.state, lambda *args: server.upstream(*args), server.session_defaults)
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
 
@@ -55,6 +56,17 @@ class GatewayTests(unittest.TestCase):
     def test_authentication_required(self):
         self.assertEqual(self.request('/api/info')[0], 401)
         self.assertEqual(self.request('/api/info', 'wrong')[0], 401)
+
+    def test_kzl_routes_require_auth_and_reject_arbitrary_execution(self):
+        for path in ('/phone/kzl/tasks', '/phone/kzl/context', '/phone/kzl/memory', '/phone/kzl/capabilities', '/phone/kzl/events'):
+            self.assertEqual(self.request(path)[0], 401)
+        self.assertEqual(self.request('/phone/kzl/ensure', body={})[0], 401)
+        self.assertEqual(self.request('/phone/kzl/submit', body={'callID': 'x', 'text': 'x'})[0], 401)
+        with patch.object(server, 'upstream') as upstream:
+            self.assertEqual(self.request('/phone/kzl/submit', 'test-token', {'callID': 'x', 'text': 'x', 'permissions': 'allow'})[0], 400)
+            self.assertEqual(self.request('/phone/kzl/config', 'test-token')[0], 403)
+            self.assertEqual(self.request('/phone/kzl/task/job_x/../../shell', 'test-token', {})[0], 400)
+            upstream.assert_not_called()
 
     def test_power_routes_do_not_execute_without_explicit_device_ticket(self):
         self.assertEqual(self.request('/phone/power/status')[0], 401)

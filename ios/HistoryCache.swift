@@ -12,7 +12,7 @@ enum HistoryCache {
     static func allowed(_ path: String) -> Bool {
         guard let url = URLComponents(string: path), url.queryItems?.contains(where: { ["cursor", "search", "type"].contains($0.name) }) != true else { return false }
         let parts = url.path.split(separator: "/")
-        return url.path == "/api/session" || (parts.count == 3 && parts[0] == "api" && parts[1] == "session" && parts[2].hasPrefix("ses")) ||
+        return url.path == "/phone/kzl/memory" || url.path == "/api/session" || (parts.count == 3 && parts[0] == "api" && parts[1] == "session" && parts[2].hasPrefix("ses")) ||
             (parts.count == 4 && parts[0] == "api" && parts[1] == "session" && parts[2].hasPrefix("ses") && parts[3] == "message")
     }
     static func file(server: String, path: String) -> URL { root.appendingPathComponent(key(server + "|" + path) + ".json") }
