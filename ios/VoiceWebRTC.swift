@@ -33,8 +33,8 @@ final class VoiceWebRTC: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
             let audio = RTCAudioSession.sharedInstance()
             audio.lockForConfiguration()
             defer { audio.unlockForConfiguration() }
-            try audio.setCategory(AVAudioSession.Category.playAndRecord.rawValue, with: [.allowBluetooth, .defaultToSpeaker])
-            try audio.setMode(AVAudioSession.Mode.voiceChat.rawValue)
+            try audio.setCategory(.playAndRecord, with: [.allowBluetooth, .defaultToSpeaker])
+            try audio.setMode(.voiceChat)
             try audio.setActive(true)
         }
         let offer: RTCSessionDescription = try await withCheckedThrowingContinuation { continuation in
