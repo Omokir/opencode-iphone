@@ -63,8 +63,14 @@ struct VoiceCallView: View {
         NavigationStack {
             List {
                 Section {
-                    Label(voice.status, systemImage: voice.open ? "waveform.circle.fill" : "phone.circle")
-                        .font(.title3.weight(.semibold)).foregroundStyle(voice.active ? Color.green : Style.blue)
+                    VStack(spacing: 18) {
+                        Image(systemName: voice.muted ? "mic.slash" : voice.open ? "waveform" : "waveform.circle")
+                            .font(.system(size: 52, weight: .light)).foregroundStyle(voice.active ? Color.primary : Color.secondary)
+                            .frame(width: 112, height: 112)
+                            .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                            .accessibilityHidden(true)
+                        Text(voice.status).font(.title3.weight(.medium)).multilineTextAlignment(.center)
+                    }.frame(maxWidth: .infinity).padding(.vertical, 24)
                     Text("Agente KzL · voz Realtime · execução persistente no notebook").font(.caption).foregroundStyle(.secondary)
                     if voice.open {
                         Text("\(voice.elapsedSeconds / 60):\(String(format: "%02d", voice.elapsedSeconds % 60)) / \(voice.maximumSeconds / 60):00").font(.system(.headline, design: .monospaced)).accessibilityLabel("Duração da chamada")
@@ -74,9 +80,17 @@ struct VoiceCallView: View {
                             Button("Usar alto-falante") { voice.useSpeaker() }.disabled(!voice.active)
                             AudioRoutePicker().frame(width: 44, height: 44).accessibilityLabel("Selecionar saída de áudio no iOS")
                         }
-                        Button(voice.muted ? "Ativar microfone" : "Mudo", systemImage: voice.muted ? "mic.slash.fill" : "mic.fill") { voice.setMuted(!voice.muted) }.disabled(!voice.active)
+                        HStack(spacing: 20) {
+                            Button { voice.setMuted(!voice.muted) } label: {
+                                Label(voice.muted ? "Ativar" : "Mudo", systemImage: voice.muted ? "mic.slash.fill" : "mic.fill")
+                                    .frame(minHeight: 48)
+                            }.disabled(!voice.active).buttonStyle(.bordered)
+                            Spacer()
+                            Button(role: .destructive) { voice.end() } label: {
+                                Label("Encerrar", systemImage: "phone.down.fill").frame(minHeight: 48)
+                            }.buttonStyle(.borderedProminent)
+                        }
                         Button("Parar somente fala", systemImage: "speaker.slash") { voice.stopSpeaking() }.disabled(!voice.active)
-                        Button("Encerrar chamada", role: .destructive) { voice.end() }
                     } else {
                         NavigationLink("Revisar tarefas sem reenviar") { TaskHistoryView() }
                         Button("Ligar", systemImage: "phone.fill") { consent = true }.disabled(soundTest.running)
@@ -110,7 +124,7 @@ struct VoiceCallView: View {
                         ShareLink(item: voice.diagnosticsText) { Label("Compartilhar contadores", systemImage: "square.and.arrow.up") }
                     }
                 }
-            }.navigationTitle("Conversa por voz").navigationBarTitleDisplayMode(.inline)
+             }.listStyle(.insetGrouped).navigationTitle("Conversa por voz").navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button("Fechar") { voice.end(); dismiss() } }
                 .onDisappear { voice.end(); soundTest.stop() }
                 .onChange(of: phase) { _, value in if value == .background { voice.end(); soundTest.stop() } }

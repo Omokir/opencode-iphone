@@ -151,6 +151,15 @@ struct ConnectView: View {
     @State private var kzl: Session?
     @State private var kzlError: String?
     @State private var kzlBusy = false
+    @State private var pendingActivity = false
+    @State private var compactColumn: NavigationSplitViewColumn = .detail
+    @State private var columns: NavigationSplitViewVisibility = .automatic
+    private var selectedConversation: Binding<Session?> {
+        Binding(get: { path.last }, set: { value in
+            path = value.map { [$0] } ?? []
+            if value != nil { compactColumn = .detail }
+        })
+    }
     var searching: Bool { !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var displayedSessions: [Session] {
         SessionActivityOrder.sorted(searching ? searchResults : sessions).filter { session in
@@ -165,8 +174,8 @@ struct ConnectView: View {
     var pinnedIDs: [String] { pins.ids(server: api.server).filter { id in id != kzl?.id && !sessions.contains(where: { $0.id == id && $0.isKzL }) } }
     var otherSessions: [Session] { displayedSessions.filter { !$0.isKzL && $0.id != kzl?.id && !pins.contains($0.id, server: api.server) } }
     var body: some View {
-        NavigationStack(path: $path) {
-            List {
+        NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
+            List(selection: selectedConversation) {
                 Section {
                     if let kzl {
                         NavigationLink(value: kzl) {
@@ -250,11 +259,11 @@ struct ConnectView: View {
                 do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
                 await search()
             }
-            .navigationDestination(for: Session.self) { ChatView(session: $0) }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                         Menu {
                             Button("Ajustes", systemImage: "gearshape") { settings = true }
+                            Button("Atividade e pendências", systemImage: "tray") { pendingActivity = true }
                             Button("Arquivos do notebook", systemImage: "folder") { fileBrowser = true }
                             Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
                             Button("Tarefas deste iPhone", systemImage: "checklist") { taskHistory = true }
@@ -292,6 +301,7 @@ struct ConnectView: View {
                 if value != .active { activeGeneration = UUID(); activeExpiry?.cancel(); runningIDs = []; activeUnavailable = true }
             }
             .sheet(isPresented: $settings) { SettingsView() }
+            .sheet(isPresented: $pendingActivity) { PendingActivityView(directories: Array(Set(sessions.map { $0.location.directory })).sorted()) }
             .sheet(isPresented: $projectPicker) { ProjectsView { session in sessions.insert(session, at: 0); path.append(session) } }
             .sheet(isPresented: $taskHistory) { NavigationStack { TaskHistoryView().toolbar { Button("Fechar") { taskHistory = false } } } }
             .sheet(isPresented: $transferCenter) { NavigationStack { TransferCenterView().toolbar { Button("Fechar") { transferCenter = false } } } }
@@ -303,7 +313,21 @@ struct ConnectView: View {
                 Button("Criar") { Task { await newSession() } }
                 Button("Cancelar", role: .cancel) { }
             } message: { Text("Use caminho absoluto da pasta onde OpenCode vai trabalhar.") }
+        } detail: {
+            NavigationStack {
+                if let selected = path.last {
+                    ChatView(session: selected).id(selected.id)
+                } else {
+                    VStack(spacing: 20) {
+                        Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 42, weight: .light))
+                        Text("O que vamos fazer?").font(.title2.weight(.semibold))
+                        Button("Abrir histórico", systemImage: "sidebar.left") { compactColumn = .sidebar; columns = .all }
+                        if let kzl { Button("Conversar com KzL", systemImage: "waveform") { path = [kzl] } }
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(uiColor: .systemBackground))
+                }
+            }
         }
+        .onChange(of: path.last?.id) { _, id in if id != nil { compactColumn = .detail } }
     }
     func loadKzL() async {
         guard !kzlBusy else { return }
@@ -933,6 +957,7 @@ struct ConnectView: View {
 struct MessageView: View {
     let message: Message
     var assistantLabel = "OPENCODE"
+    private var toolCount: Int { (message.content ?? []).filter { $0.type == "tool" }.count }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -949,7 +974,12 @@ struct MessageView: View {
                 Label(file.name ?? file.mime, systemImage: file.mime.hasPrefix("image/") ? "photo" : "paperclip")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(Array((message.content ?? []).enumerated()), id: \.offset) { _, part in
+            ForEach(Array((message.content ?? []).filter { $0.type == "text" }.enumerated()), id: \.offset) { _, part in
+                if let text = part.text { MarkdownMessage(text: text) }
+            }
+            if toolCount > 0 {
+            DisclosureGroup("Ferramentas · \(toolCount) etapas") {
+            ForEach(Array((message.content ?? []).filter { $0.type == "tool" }.enumerated()), id: \.offset) { _, part in
                 if part.type == "text", let text = part.text {
                     MarkdownMessage(text: text)
                 } else if part.type == "tool" {
@@ -964,6 +994,8 @@ struct MessageView: View {
                         Text(status(part.state?.status)).font(.caption2)
                     } }.foregroundStyle(.secondary).padding(10).background(Style.paper, in: RoundedRectangle(cornerRadius: 8))
                 }
+            }
+            }.font(.subheadline).tint(.secondary)
             }
         }
         .padding(message.type == "user" ? 16 : 2).frame(maxWidth: .infinity, alignment: .leading)
