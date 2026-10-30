@@ -3,9 +3,9 @@ import PhotosUI
 import UniformTypeIdentifiers
 
 enum Style {
-    static let ink = Color(red: 0.11, green: 0.17, blue: 0.25)
-    static let blue = Color(red: 0.13, green: 0.32, blue: 0.76)
-    static let paper = Color(uiColor: .systemGroupedBackground)
+    static let ink = Color.primary
+    static let blue = PocketDesign.kzL // Legacy symbol retained for existing views.
+    static let paper = PocketDesign.surface
 }
 
 @main
@@ -18,6 +18,14 @@ struct OpenCodePhoneApp: App {
     @StateObject private var call = KzLCallCoordinator.shared
     @StateObject private var projects = ProjectFavorites()
     @StateObject private var receiver = DocumentReceiver.shared
+    @AppStorage("appearance.theme") private var appearance = "dark"
+    private var preferredAppearance: ColorScheme? {
+        #if SNAPSHOT
+        return nil // Simulator appearance fixtures remain independently testable.
+        #else
+        switch appearance { case "light": return .light; case "system": return nil; default: return .dark }
+        #endif
+    }
     #if SNAPSHOT
     @StateObject private var unread = UnreadStore(defaults: UserDefaults(suiteName: "snapshot-" + UUID().uuidString)!)
     @StateObject private var pins = PinStore(defaults: UserDefaults(suiteName: "pins-snapshot-" + UUID().uuidString)!)
@@ -50,7 +58,7 @@ struct OpenCodePhoneApp: App {
                             .font(.caption.weight(.medium)).foregroundStyle(PocketDesign.kzL).padding(.horizontal, 14).frame(minHeight: 34)
                             .background(PocketDesign.kzL.opacity(0.08), in: Capsule())
                         Spacer()
-                    }.padding(.vertical, 4).background(Color(uiColor: .systemBackground))
+                    }.padding(.vertical, 4).background(PocketDesign.canvas)
                 }
             }
             .fullScreenCover(isPresented: Binding(get: { call.presented && privacy.allowsAccess }, set: { call.presented = $0 })) { KzLCallScreen().environmentObject(api) }
@@ -67,7 +75,9 @@ struct OpenCodePhoneApp: App {
                     do { try await Task.sleep(for: .seconds(8)) } catch { break }
                 }
             }
-            .tint(.primary)
+            .background(PocketDesign.canvas)
+            .preferredColorScheme(preferredAppearance)
+            .tint(PocketDesign.kzL)
         }
     }
 }
@@ -114,7 +124,8 @@ struct ConnectView: View {
                 } header: { Text("Antes de começar") }
                 if let error { Section { Text(error).foregroundStyle(.red).textSelection(.enabled) } }
             }
-            .navigationTitle("OpenCode Pocket").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("KzL Agent").navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(PocketDesign.canvas, for: .navigationBar)
             .onAppear { address = api.server }
             .sheet(isPresented: $computersPresented) { ComputersView() }
         }
@@ -214,7 +225,7 @@ struct ConnectView: View {
                             Button { KzLCallCoordinator.shared.prepare(api: api, session: kzl) } label: {
                                 Image(systemName: "phone").frame(width: 44, height: 44).foregroundStyle(PocketDesign.kzL)
                             }.buttonStyle(.borderless).accessibilityLabel("Ligar para KzL")
-                        }.tag(kzl)
+                        }.tag(kzl).listRowBackground(PocketDesign.surface)
                     } else {
                         Button { Task { await loadKzL() } } label: {
                             Label(kzlBusy ? "Abrindo Agente KzL…" : "Agente KzL · conectar", systemImage: "waveform.circle")
@@ -269,8 +280,9 @@ struct ConnectView: View {
                     }
                 }
             }
-            .navigationTitle("Pocket").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("KzL Agent").navigationBarTitleDisplayMode(.inline)
             .listStyle(.plain)
+            .scrollContentBackground(.hidden).background(PocketDesign.canvas)
             .safeAreaInset(edge: .bottom, spacing: 0) { sidebarFooter }
             .searchable(text: $searchText, isPresented: $searchPresented, placement: .navigationBarDrawer, prompt: "Nome da conversa")
             .task(id: searchText) {
@@ -328,7 +340,7 @@ struct ConnectView: View {
                         Text("Como posso ajudar?").font(.system(.title, weight: .semibold))
                         Button("Nova conversa", systemImage: "plus") { Task { await newSession() } }.buttonStyle(.borderedProminent).disabled(busy)
                         if let kzl { Button("Conversar com KzL") { path = [kzl] }.foregroundStyle(PocketDesign.kzL) }
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(uiColor: .systemBackground))
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity).background(PocketDesign.canvas)
                 }
             }
         }
@@ -616,7 +628,7 @@ struct ConnectView: View {
             permissionCards
             attachmentStrip
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(PocketDesign.canvas)
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
     }
     @ViewBuilder private var controlHeader: some View {
@@ -863,17 +875,19 @@ struct ConnectView: View {
                 } label: {
                     Image(systemName: store.sending ? "ellipsis" : "arrow.up")
                         .font(.system(size: 17, weight: .semibold)).frame(width: 36, height: 36)
-                        .foregroundStyle(Color(uiColor: .systemBackground)).background(Color.primary, in: Circle())
+                        .foregroundStyle(.white).background(PocketDesign.signalRed, in: Circle())
                         .frame(width: 44, height: 44)
                 }.disabled(store.sending || importing || changingAgent || api.reachable == false || (session.isPhoneControl && !controlAllowed) || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty))
                      .accessibilityLabel("Enviar mensagem")
                      .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty ? 0.35 : 1)
-            }.padding(6).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 28))
-                .padding(.horizontal, 12).padding(.vertical, 8).background(Color(uiColor: .systemBackground))
+            }.padding(6).background(PocketDesign.surface, in: RoundedRectangle(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(PocketDesign.line, lineWidth: 1))
+                .padding(.horizontal, 12).padding(.vertical, 8).background(PocketDesign.canvas)
     }
     private var navigationContent: some View {
         chatContent
         .navigationTitle(session.isKzL ? "Agente KzL" : session.title ?? "Conversa").navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(PocketDesign.canvas, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if let onNewConversation { Button("Nova conversa", systemImage: "square.and.pencil", action: onNewConversation) }
@@ -1126,7 +1140,8 @@ struct MessageView: View {
         }
         .font(.body).lineSpacing(4)
         .padding(message.type == "user" ? 14 : 2).frame(maxWidth: .infinity, alignment: .leading)
-        .background(message.type == "user" ? Color(uiColor: .secondarySystemBackground) : Color.clear, in: RoundedRectangle(cornerRadius: 24))
+        .background(message.type == "user" ? PocketDesign.bubble : Color.clear, in: RoundedRectangle(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(message.type == "user" ? PocketDesign.line : Color.clear, lineWidth: 1))
         .padding(.leading, message.type == "user" ? 44 : 0)
         .contextMenu { Button("Copiar mensagem", systemImage: "doc.on.doc") { UIPasteboard.general.string = ([message.text ?? ""] + (message.content ?? []).compactMap(\.text)).joined(separator: "\n") } }
     }
@@ -1144,9 +1159,17 @@ struct SettingsView: View {
     @State private var error: String?
     @EnvironmentObject var privacy: PrivacyLock
     @State private var advanced = UserDefaults.standard.bool(forKey: "settings.advanced")
+    @AppStorage("appearance.theme") private var appearance = "dark"
     var body: some View {
         NavigationStack {
             Form {
+                Section("Aparência") {
+                    Picker("Tema", selection: $appearance) {
+                        Text("Darktech · preto e vermelho").tag("dark")
+                        Text("Claro").tag("light")
+                        Text("Sistema").tag("system")
+                    }.accessibilityIdentifier("settings.appearance")
+                }
                 Section {
                     Text(api.server).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     Toggle("Manter notebook acordado", isOn: Binding(get: { awake }, set: { value in Task { await setAwake(value) } })).disabled(!loaded || busy)
@@ -1180,6 +1203,8 @@ struct SettingsView: View {
                 Button("Desconectar este iPhone", role: .destructive) { api.disconnect(); dismiss() }
             }
             .navigationTitle("Ajustes")
+            .scrollContentBackground(.hidden).background(PocketDesign.canvas)
+            .toolbarBackground(PocketDesign.canvas, for: .navigationBar)
             .toolbar { Button("Concluir") { dismiss() } }
             .task {
                 do { let status: Awake = try await api.request("/phone/status"); awake = status.awake; loaded = true }
