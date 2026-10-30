@@ -48,6 +48,7 @@ final class API: ObservableObject {
     @Published var reachable: Bool?
     @Published var connectionIssue: String?
     @Published private(set) var connectionID = UUID()
+    @Published private(set) var computers: [ComputerProfile] = []
     private var token: String?
     let transport: URLSession
     private let eventTransport: URLSession
@@ -64,6 +65,14 @@ final class API: ObservableObject {
         transport = URLSession(configuration: configuration, delegate: PrivateAPITransport(), delegateQueue: nil)
         eventTransport = URLSession(configuration: configuration, delegate: PrivateAPITransport(), delegateQueue: nil)
         connected = token != nil && !server.isEmpty
+        do {
+            computers = try ComputerVault.read()
+            if let token, !server.isEmpty, !computers.contains(where: { $0.server == server }) {
+                var migrated = computers
+                migrated.append(ComputerProfile(id: UUID().uuidString, name: "Meu computador", server: server, token: token))
+                try ComputerVault.save(migrated); computers = migrated
+            }
+        } catch { connectionIssue = "Lista de computadores indisponível; conexão atual preservada." }
     }
 
     static func validate(_ value: String) throws -> URL {
@@ -88,12 +97,14 @@ final class API: ObservableObject {
         let data: Data
         let response: URLResponse
         let requestServer = server
+        let requestConnection = connectionID
         do {
             (data, response) = try await transport.data(for: request)
         } catch {
-            if (error as? URLError)?.code != .cancelled { reachable = false; connectionIssue = ConnectionAdvice.describe(error) }
+            if connectionID == requestConnection, (error as? URLError)?.code != .cancelled { reachable = false; connectionIssue = ConnectionAdvice.describe(error) }
             throw error
         }
+        guard connectionID == requestConnection, server == requestServer else { throw CancellationError() }
         reachable = true
         connectionIssue = nil
         guard let http = response as? HTTPURLResponse else { throw PhoneError.message("Resposta inválida.") }
@@ -150,19 +161,40 @@ final class API: ObservableObject {
     }
 
     func pair(server address: String, code: String) async throws {
-        _ = try Self.validate(address)
-        let previous = server
-        server = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            let response: PairResponse = try await request("/pair", method: "POST", body: ["code": code, "name": UIDevice.current.model], authenticated: false)
-            try Vault.save(response.token)
-            token = response.token
-            UserDefaults.standard.set(server, forKey: "server")
-            connected = true
-        } catch {
-            server = previous
-            throw error
-        }
+        try await addComputer(name: "Meu computador", address: address, code: code)
+    }
+
+    func addComputer(name: String, address: String, code: String) async throws {
+        let base = try Self.validate(address).absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard code.count == 6, code.allSatisfy(\.isNumber) else { throw PhoneError.message("Código deve ter seis dígitos.") }
+        let generation = connectionID
+        var request = URLRequest(url: URL(string: base + "/pair")!)
+        request.httpMethod = "POST"; request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["code": code, "name": UIDevice.current.model])
+        let (data, response) = try await transport.data(for: request)
+        guard connectionID == generation else { throw CancellationError() }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw PhoneError.message("Pareamento recusado. Confira código e endereço; conexão atual preservada.") }
+        let pair = try JSONDecoder().decode(PairResponse.self, from: data)
+        var profiles = try ComputerVault.read()
+        profiles.removeAll { $0.server == base }
+        guard profiles.count < 20 else { throw PhoneError.message("Limite de 20 computadores.") }
+        let profile = ComputerProfile(id: UUID().uuidString, name: String(name.prefix(80)), server: base, token: pair.token)
+        profiles.append(profile)
+        try ComputerVault.save(profiles); computers = profiles
+        try selectComputer(profile.id)
+    }
+    func selectComputer(_ id: String) throws {
+        guard let computer = computers.first(where: { $0.id == id }) else { throw PhoneError.message("Computador não encontrado.") }
+        _ = try Self.validate(computer.server)
+        try Vault.save(computer.token)
+        BackgroundInbox.shared.cancelAll()
+        let old = connectionID.uuidString
+        connectionID = UUID()
+        transport.getAllTasks { $0.filter { $0.originalRequest?.value(forHTTPHeaderField: "X-Pocket-Connection-ID") == old }.forEach { $0.cancel() } }
+        eventTransport.getAllTasks { $0.forEach { $0.cancel() } }
+        token = computer.token; server = computer.server
+        UserDefaults.standard.set(server, forKey: "server")
+        reachable = nil; connectionIssue = nil; connected = true
     }
 
     func watchKzL(revision: String, changed: @MainActor () -> Void) async throws {

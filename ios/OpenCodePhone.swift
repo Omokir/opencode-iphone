@@ -31,7 +31,7 @@ struct OpenCodePhoneApp: App {
                 #if SNAPSHOT
                 SnapshotRoot()
                 #else
-                if api.connected { SessionsView() } else { ConnectView() }
+                if api.connected { SessionsView().id(api.connectionID) } else { ConnectView() }
                 #endif
               } else { PocketLockView() }
             }
@@ -64,6 +64,7 @@ struct ConnectView: View {
     @State private var code = ""
     @State private var busy = false
     @State private var error: String?
+    @State private var computersPresented = false
     var body: some View {
         NavigationStack {
             Form {
@@ -76,6 +77,7 @@ struct ConnectView: View {
                     }.padding(.vertical, 20)
                 }.listRowBackground(Color.clear)
                 Section("Conectar ao notebook") {
+                    if !api.computers.isEmpty { Button("Selecionar computador salvo", systemImage: "desktopcomputer") { computersPresented = true } }
                     TextField("https://notebook.…ts.net:8443", text: $address)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityLabel("Endereço do notebook")
@@ -100,6 +102,7 @@ struct ConnectView: View {
             }
             .navigationTitle("OpenCode Pocket").navigationBarTitleDisplayMode(.inline)
             .onAppear { address = api.server }
+            .sheet(isPresented: $computersPresented) { ComputersView() }
         }
     }
 }
@@ -152,6 +155,7 @@ struct ConnectView: View {
     @State private var kzlError: String?
     @State private var kzlBusy = false
     @State private var pendingActivity = false
+    @State private var computersPresented = false
     @State private var compactColumn: NavigationSplitViewColumn = .detail
     @State private var columns: NavigationSplitViewVisibility = .automatic
     private var selectedConversation: Binding<Session?> {
@@ -273,6 +277,7 @@ struct ConnectView: View {
                             Button("Pasta automática do iPhone", systemImage: "arrow.up.doc") { inboxSettings = true }
                             }
                             Section("Aplicativo") {
+                            Button("Computadores", systemImage: "desktopcomputer") { computersPresented = true }
                             Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
                             Button("Ajustes", systemImage: "gearshape") { settings = true }
                             Button("Controlar meu iPhone (USB)", systemImage: "cable.connector") { phoneControl = true }
@@ -307,6 +312,7 @@ struct ConnectView: View {
                 if value != .active { activeGeneration = UUID(); activeExpiry?.cancel(); runningIDs = []; activeUnavailable = true }
             }
             .sheet(isPresented: $settings) { SettingsView() }
+            .sheet(isPresented: $computersPresented) { ComputersView() }
             .sheet(isPresented: $pendingActivity) { PendingActivityView(directories: Array(Set(sessions.map { $0.location.directory })).sorted()) }
             .sheet(isPresented: $projectPicker) { ProjectsView { session in sessions.insert(session, at: 0); path.append(session) } }
             .sheet(isPresented: $taskHistory) { NavigationStack { TaskHistoryView().toolbar { Button("Fechar") { taskHistory = false } } } }
