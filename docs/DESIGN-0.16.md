@@ -64,3 +64,23 @@ Screenshots and accessibility assertions demonstrate those fixture states, not
 end-to-end live server synchronization or physical microphone/background audio.
 CallKit, lock-screen audio and the user's historical keyboard bug still require
 physical acceptance. The redesign does not claim parity with the ChatGPT app.
+
+### Verified delivery
+
+- [Final IPA build and regression tests](https://github.com/Omokir/opencode-iphone/actions/runs/41034366896): passed; 112 gateway tests plus catalog and native regression suites.
+- [Full iPhone 11 UI interactions](https://github.com/Omokir/opencode-iphone/actions/runs/41032220252): passed history on open, keyboard with unsent draft, new chat without directory prompt, billing cancellation and synthetic active-call controls.
+- [Final call contrast preview](https://github.com/Omokir/opencode-iphone/actions/runs/41034375644): passed and visually reviewed.
+- Unsigned IPA: `OpenCode-Pocket-0.16.0.ipa`, version 0.16.0, build 29. SHA-256: `e87b8554474dd292be567bd832817766faa971ac2fad97b836c48cbaa70570f4`.
+- No physical installation or paid call performed for this delivery.
+
+### Reviewed simulator previews
+
+Synthetic content; call screenshot is layout-only, not evidence of working audio.
+
+| Conversation | Keyboard and unsent draft |
+| --- | --- |
+| <img src="previews/0.16/conversation.png" width="300" alt="Light conversation with compact composer"> | <img src="previews/0.16/keyboard.png" width="300" alt="Dark conversation with keyboard and unsent draft"> |
+
+| History sidebar | KzL call controls |
+| --- | --- |
+| <img src="previews/0.16/sidebar.png" width="300" alt="History sidebar with original KzL avatar and fixed resource footer"> | <img src="previews/0.16/call.png" width="300" alt="Synthetic KzL call with audio, end and mute controls"> |
