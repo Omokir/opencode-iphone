@@ -2,6 +2,7 @@ import plistlib
 import struct
 import sys
 import zipfile
+import hashlib
 
 with zipfile.ZipFile(sys.argv[1]) as archive:
     assert archive.testzip() is None, 'Corrupt ZIP'
@@ -13,5 +14,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     assert executable[:4] == b'\xcf\xfa\xed\xfe', 'Expected Mach-O 64-bit'
     assert struct.unpack('<I', executable[4:8])[0] == 0x100000c, 'Expected arm64'
     assert root + 'AppIcon60x60@3x.png' in archive.namelist()
+    if tuple(map(int, info['CFBundleShortVersionString'].split('.'))) >= (0, 16, 0):
+        assert hashlib.sha256(archive.read(root + 'KzL.png')).hexdigest() == 'b590bf8c441df43e9b9a314b8220c6e3050e451369ede0a4189a7fecffe677ef', 'Original KzL avatar missing or changed'
     print('Validated: native arm64 IPA, iOS 17+, bundle com.omokir.opencodepocket, version ' + info['CFBundleShortVersionString'])
     print('Signing and device installation not verified by this validator.')

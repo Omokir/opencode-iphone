@@ -37,12 +37,20 @@ import Combine
     private var ignoredResponses = Set<String>()
     private var responseID: String?
     private var responding = false
-    private var speaking = false
-    private var remotePlaying = false
+    @Published private(set) var speaking = false
+    @Published private(set) var remotePlaying = false
     private var followNeeded = false
     private var boundServer = ""
     private var boundConnectionID: UUID?
     var open: Bool { active || connecting }
+    var presentationStatus: String {
+        if connecting { return "Conectando…" }
+        if !active { return "Pronto para conversar" }
+        if remotePlaying { return "Respondendo" }
+        if muted { return "Microfone silenciado" }
+        if speaking { return "Ouvindo você" }
+        return "Pode falar"
+    }
 
     func start(_ api: API, session: Session, monitor: ChatStore, systemCall: Bool = false) async {
         guard !open else { return }

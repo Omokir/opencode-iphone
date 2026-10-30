@@ -12,8 +12,8 @@ struct ConversationRow: View {
         NavigationLink(value: session) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(session.title ?? "Sem título").font(.headline).lineLimit(2)
-                    Text(session.location.directory).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(session.isKzL ? "Agente KzL" : session.title ?? "Sem título").font(.body.weight(.medium)).lineLimit(1)
+                    Text(URL(fileURLWithPath: session.location.directory).lastPathComponent).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }.padding(.vertical, 5)
                 Spacer(minLength: 0)
                 if pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(Style.blue).accessibilityHidden(true) }
@@ -24,6 +24,7 @@ struct ConversationRow: View {
                 } else if unread { Circle().fill(Style.blue).frame(width: 9, height: 9).accessibilityHidden(true) }
             }
         }
+        .listRowSeparator(.hidden)
         .accessibilityValue([pinned ? "Fixada" : nil, running ? "Em execução no notebook" : unread ? "Resposta não lida" : nil].compactMap { $0 }.joined(separator: ". "))
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button(pinned ? "Desafixar" : "Fixar", systemImage: pinned ? "pin.slash" : "pin", action: togglePin).tint(Style.blue)

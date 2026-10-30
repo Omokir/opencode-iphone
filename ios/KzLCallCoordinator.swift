@@ -14,6 +14,9 @@ import WebRTC
     @Published private(set) var callID: UUID?
     @Published var presented = false
     @Published var error: String?
+    @Published var startRequested = false
+    @Published private(set) var isStarting = false
+    private var requestGeneration = UUID()
     private let provider: CXProvider
     private let controller = CXCallController()
     private var api: API?
@@ -39,18 +42,35 @@ import WebRTC
             }
         }
     }
+    func prepare(api: API, session: Session) {
+        guard session.isKzL else { return }
+        if callID == nil && !isStarting {
+            self.api = api; self.session = session; error = nil; voice.error = nil
+            startRequested = true
+        }
+        presented = true
+    }
     func start(api: API, session: Session) async {
-        guard callID == nil, session.isKzL else { presented = true; return }
+        startRequested = false
+        guard callID == nil, !isStarting, session.isKzL else { presented = true; return }
+        isStarting = true
+        let generation = requestGeneration; let connection = api.connectionID
+        defer { if requestGeneration == generation { isStarting = false } }
         error = nil
         voice.error = nil
         let allowed = await withCheckedContinuation { continuation in
             AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) }
         }
+        guard requestGeneration == generation, api.connectionID == connection else { return }
         guard allowed, api.connected else { error = "Microfone ou conexão indisponível."; return }
         let id = UUID(); self.api = api; self.session = session; callID = id; reportedConnected = false
         let action = CXStartCallAction(call: id, handle: CXHandle(type: .generic, value: "Agente KzL"))
         do {
-            try await controller.request(CXTransaction(action: action)); presented = true
+            try await controller.request(CXTransaction(action: action))
+            guard requestGeneration == generation, api.connectionID == connection, callID == id else {
+                provider.reportCall(with: id, endedAt: Date(), reason: .remoteEnded); return
+            }
+            presented = true
             activationTimeout = Task {
                 do { try await Task.sleep(for: .seconds(20)) } catch { return }
                 guard callID == id, startTask == nil else { return }
@@ -58,9 +78,12 @@ import WebRTC
                 end()
             }
         }
-        catch { self.error = "iOS não autorizou iniciar ligação. Nenhuma sessão de voz criada."; finishSystemCall() }
+        catch {
+            guard requestGeneration == generation else { return }
+            self.error = "iOS não autorizou iniciar ligação. Nenhuma sessão de voz criada."; finishSystemCall()
+        }
     }
-    func end() { startTask?.cancel(); startTask = nil; voice.end(); finishSystemCall() }
+    func end() { requestGeneration = UUID(); isStarting = false; startRequested = false; startTask?.cancel(); startTask = nil; voice.end(); finishSystemCall() }
     private func finishSystemCall() {
         guard let id = callID else { return }
         callID = nil; reportedConnected = false; api = nil; startTask = nil

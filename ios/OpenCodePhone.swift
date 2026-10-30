@@ -42,10 +42,15 @@ struct OpenCodePhoneApp: App {
             .environmentObject(inbox)
             .environmentObject(privacy)
             .environmentObject(projects)
-            .overlay(alignment: .top) {
+            .safeAreaInset(edge: .top, spacing: 0) {
                 if call.callID != nil && privacy.allowsAccess && !call.presented {
-                    Button("Voltar à ligação KzL", systemImage: "phone.fill") { call.presented = true }
-                        .buttonStyle(.borderedProminent).tint(.red).padding(.top, 8)
+                    HStack {
+                        Spacer()
+                        Button("KzL · voltar à ligação", systemImage: "phone.fill") { call.presented = true }
+                            .font(.caption.weight(.medium)).foregroundStyle(PocketDesign.kzL).padding(.horizontal, 14).frame(minHeight: 34)
+                            .background(PocketDesign.kzL.opacity(0.08), in: Capsule())
+                        Spacer()
+                    }.padding(.vertical, 4).background(Color(uiColor: .systemBackground))
                 }
             }
             .fullScreenCover(isPresented: Binding(get: { call.presented && privacy.allowsAccess }, set: { call.presented = $0 })) { KzLCallScreen().environmentObject(api) }
@@ -62,7 +67,7 @@ struct OpenCodePhoneApp: App {
                     do { try await Task.sleep(for: .seconds(8)) } catch { break }
                 }
             }
-            .tint(Style.blue)
+            .tint(.primary)
         }
     }
 }
@@ -127,7 +132,6 @@ struct ConnectView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var settings = false
-    @State private var create = false
     @State private var phoneControl = false
     @State private var fileBrowser = false
     @State private var inboxSettings = false
@@ -141,7 +145,6 @@ struct ConnectView: View {
     @State private var quotaFailed = false
     @State private var quotaLoading = false
     @State private var quotaChecked = Date.distantPast
-    @State private var directory = ""
     @State private var pinsChecked = Date.distantPast
     @State private var pinLoadFailed = false
     @State private var loadedMore = false
@@ -166,12 +169,17 @@ struct ConnectView: View {
     @State private var pendingActivity = false
     @State private var computersPresented = false
     @State private var compactColumn: NavigationSplitViewColumn = .detail
+    @State private var restoredConversation = false
     @State private var columns: NavigationSplitViewVisibility = .automatic
     private var selectedConversation: Binding<Session?> {
         Binding(get: { path.last }, set: { value in
             path = value.map { [$0] } ?? []
             if value != nil { compactColumn = .detail }
         })
+    }
+    init(showSidebar: Bool = false) {
+        _compactColumn = State(initialValue: showSidebar ? .sidebar : .detail)
+        _columns = State(initialValue: showSidebar ? .all : .automatic)
     }
     var searching: Bool { !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var displayedSessions: [Session] {
@@ -191,17 +199,22 @@ struct ConnectView: View {
             List(selection: selectedConversation) {
                 Section {
                     if let kzl {
+                        HStack(spacing: 4) {
                         NavigationLink(value: kzl) {
                             HStack(spacing: 12) {
-                                Image(systemName: "waveform.circle.fill").font(.largeTitle).foregroundStyle(Style.blue)
+                                KzLAvatar(active: runningIDs.contains(kzl.id)).frame(width: 44, height: 44)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("Agente KzL").font(.headline)
-                                    Text("Conversa permanente · voz, texto e tarefas").font(.caption).foregroundStyle(.secondary)
+                                    Text("Seu agente no computador").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 0)
                                 if runningIDs.contains(kzl.id) { Image(systemName: "gearshape.fill").foregroundStyle(.green) }
                             }.padding(.vertical, 4)
                         }.accessibilityIdentifier("kzl.permanent-chat")
+                            Button { KzLCallCoordinator.shared.prepare(api: api, session: kzl) } label: {
+                                Image(systemName: "phone").frame(width: 44, height: 44).foregroundStyle(PocketDesign.kzL)
+                            }.buttonStyle(.borderless).accessibilityLabel("Ligar para KzL")
+                        }.tag(kzl)
                     } else {
                         Button { Task { await loadKzL() } } label: {
                             Label(kzlBusy ? "Abrindo Agente KzL…" : "Agente KzL · conectar", systemImage: "waveform.circle")
@@ -211,22 +224,11 @@ struct ConnectView: View {
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 Section {
-                    DisclosureGroup(isExpanded: $dashboardExpanded) {
-                        HostBatteryView(status: hostStatus, stale: hostStatusFailed || api.reachable == false)
-                        StorageDashboard(host: hostStatus?.storage, stale: hostStatusFailed || api.reachable == false)
-                        CodexQuotaView(quota: codexQuota, failed: quotaFailed, loading: quotaLoading) { Task { await loadQuota(refresh: true) } }
-                    } label: {
-                        Label(api.reachable == false ? "Notebook indisponível" : "Notebook · indicadores", systemImage: "laptopcomputer")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    if cachedList { Label("Histórico salvo · atualizando…", systemImage: "internaldrive").font(.caption).foregroundStyle(.secondary) }
-                    Picker("Filtrar conversas", selection: $listFilter) {
-                        Text("Todas").tag("Todas")
-                        Text("Não lidas").tag("Não lidas")
-                        Text("Em execução").tag("Em execução")
-                    }.pickerStyle(.segmented)
-                    if activeUnavailable { Text("Estado de execução não confirmado. Verde não será mostrado até próxima consulta válida.").font(.caption).foregroundStyle(.secondary) }
+                    Button("Nova conversa", systemImage: "square.and.pencil") { Task { await newSession() } }.disabled(busy)
+                    Button("Buscar conversas", systemImage: "magnifyingglass") { searchPresented = true }
+                    Button("Projetos favoritos", systemImage: "star") { projectPicker = true }
                 }
+                if cachedList { Text("Histórico salvo · atualizando").font(.caption).foregroundStyle(.secondary) }
                 if !displayedPins.isEmpty {
                     Section("Fixadas") {
                         ForEach(displayedPins, id: \.self) { id in
@@ -243,7 +245,7 @@ struct ConnectView: View {
                         if pinLoadFailed { Text("Algumas fixadas não carregaram. Puxe para atualizar.").font(.caption).foregroundStyle(.secondary) }
                     }
                 }
-                Section(pinnedIDs.isEmpty ? "Conversas" : "Outras conversas") {
+                Section {
                     ForEach(otherSessions) { session in
                         row(session, pinned: false)
                     }
@@ -256,10 +258,21 @@ struct ConnectView: View {
                         if sessions.isEmpty && !busy { Text("Crie conversa ou puxe para atualizar.").foregroundStyle(.secondary) }
                         if cursor != nil { Button("Carregar mais") { Task { await load(more: true) } }.disabled(busy) }
                     }
+                } header: {
+                    HStack {
+                        Text(listFilter == "Todas" ? "Recentes" : listFilter)
+                        Spacer()
+                        Menu {
+                            Picker("Filtrar conversas", selection: $listFilter) {
+                                Text("Todas").tag("Todas"); Text("Não lidas").tag("Não lidas"); Text("Em execução").tag("Em execução")
+                            }
+                        } label: { Image(systemName: "line.3.horizontal.decrease") }.accessibilityLabel("Filtrar conversas")
+                    }
                 }
             }
-            .navigationTitle("Conversas")
+            .navigationTitle("Pocket").navigationBarTitleDisplayMode(.inline)
             .listStyle(.plain)
+            .safeAreaInset(edge: .bottom, spacing: 0) { sidebarFooter }
             .searchable(text: $searchText, isPresented: $searchPresented, placement: .navigationBarDrawer, prompt: "Nome da conversa")
             .task(id: searchText) {
                 searchTicket = UUID()
@@ -273,27 +286,7 @@ struct ConnectView: View {
                 await search()
             }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                        Menu {
-                            Section("Trabalho") {
-                            Button("Atividade e pendências", systemImage: "tray") { pendingActivity = true }
-                            Button("Tarefas deste iPhone", systemImage: "checklist") { taskHistory = true }
-                            Button("Projetos favoritos", systemImage: "star") { projectPicker = true }
-                            }
-                            Section("Arquivos") {
-                            Button("Explorar notebook", systemImage: "folder") { fileBrowser = true }
-                            Button("Transferências", systemImage: "arrow.up.arrow.down") { transferCenter = true }
-                            Button("Pasta automática do iPhone", systemImage: "arrow.up.doc") { inboxSettings = true }
-                            }
-                            Section("Aplicativo") {
-                            Button("Computadores", systemImage: "desktopcomputer") { computersPresented = true }
-                            Button("Procurar conversas", systemImage: "magnifyingglass") { searchPresented = true }
-                            Button("Ajustes", systemImage: "gearshape") { settings = true }
-                            Button("Controlar meu iPhone (USB)", systemImage: "cable.connector") { phoneControl = true }
-                            }
-                        } label: { Image(systemName: "line.3.horizontal") }.accessibilityLabel("Menu do Pocket")
-                }
-                ToolbarItem(placement: .topBarTrailing) { Button("Nova conversa", systemImage: "square.and.pencil") { create = true } }
+                ToolbarItem(placement: .topBarTrailing) { Button("Nova conversa", systemImage: "square.and.pencil") { Task { await newSession() } }.disabled(busy) }
             }
             .overlay { if busy && sessions.isEmpty { ProgressView() } }
             .refreshable { await load(resetPagination: true) }
@@ -305,7 +298,7 @@ struct ConnectView: View {
                 }
                 if kzl == nil { kzl = sessions.first(where: \.isKzL) }
             }
-            .task(id: api.server) { await loadKzL() }
+            .task(id: api.server) { await restoreConversation(); await loadKzL() }
             .task(id: phase) {
                 guard phase == .active else { return }
                 while !Task.isCancelled {
@@ -321,6 +314,7 @@ struct ConnectView: View {
                 if value != .active { activeGeneration = UUID(); activeExpiry?.cancel(); runningIDs = []; activeUnavailable = true }
             }
             .sheet(isPresented: $settings) { SettingsView() }
+            .sheet(isPresented: $dashboardExpanded) { NotebookOverviewView() }
             .sheet(isPresented: $computersPresented) { ComputersView() }
             .sheet(isPresented: $pendingActivity) { PendingActivityView(directories: Array(Set(sessions.map { $0.location.directory })).sorted()) }
             .sheet(isPresented: $projectPicker) { ProjectsView { session in sessions.insert(session, at: 0); path.append(session) } }
@@ -329,26 +323,65 @@ struct ConnectView: View {
             .sheet(isPresented: $phoneControl) { PhoneControlView() }
             .sheet(isPresented: $fileBrowser) { FileBrowserView() }
             .sheet(isPresented: $inboxSettings) { InboxSyncView() }
-            .alert("Nova conversa", isPresented: $create) {
-                TextField("Pasta no notebook", text: $directory).textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button("Criar") { Task { await newSession() } }
-                Button("Cancelar", role: .cancel) { }
-            } message: { Text("Use caminho absoluto da pasta onde OpenCode vai trabalhar.") }
         } detail: {
             NavigationStack {
                 if let selected = path.last {
-                    ChatView(session: selected).id(selected.id)
+                    ChatView(session: selected, onNewConversation: { Task { await newSession() } }).id(selected.id)
                 } else {
                     VStack(spacing: 20) {
-                        Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 42, weight: .light))
-                        Text("O que vamos fazer?").font(.title2.weight(.semibold))
-                        Button("Abrir histórico", systemImage: "sidebar.left") { compactColumn = .sidebar; columns = .all }
-                        if let kzl { Button("Conversar com KzL", systemImage: "waveform") { path = [kzl] } }
+                        Text("Como posso ajudar?").font(.system(.title, weight: .semibold))
+                        Button("Nova conversa", systemImage: "plus") { Task { await newSession() } }.buttonStyle(.borderedProminent).disabled(busy)
+                        if let kzl { Button("Conversar com KzL") { path = [kzl] }.foregroundStyle(PocketDesign.kzL) }
                     }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(uiColor: .systemBackground))
                 }
             }
         }
-        .onChange(of: path.last?.id) { _, id in if id != nil { compactColumn = .detail } }
+        .onChange(of: path.last?.id) { _, id in
+            if let id {
+                compactColumn = .detail
+                #if !SNAPSHOT
+                UserDefaults.standard.set(id, forKey: "last.chat." + HistoryCache.key(api.server))
+                #endif
+            }
+        }
+    }
+    private var sidebarFooter: some View {
+        VStack(spacing: 4) {
+            Divider()
+            Button { dashboardExpanded = true } label: {
+                HStack {
+                    Image(systemName: "laptopcomputer")
+                    Text(api.computers.first(where: { $0.server == api.server })?.name ?? "Meu computador").lineLimit(1)
+                    Spacer()
+                    if !hostStatusFailed, let battery = hostStatus?.battery, battery.available, let percentage = battery.percentage { Text("\(percentage)%").monospacedDigit() }
+                    Image(systemName: "chevron.right").font(.caption2)
+                }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).frame(minHeight: 36)
+            }.accessibilityLabel("Indicadores do computador")
+            HStack(spacing: 0) {
+                sidebarShortcut("Computadores", icon: "desktopcomputer") { computersPresented = true }
+                sidebarShortcut("Arquivos", icon: "folder") { fileBrowser = true }
+                sidebarShortcut("Atividade", icon: "tray") { pendingActivity = true }
+                sidebarShortcut("Ajustes", icon: "gearshape") { settings = true }
+            }.font(.system(size: 17)).foregroundStyle(.primary)
+        }.padding(.horizontal, 8).padding(.bottom, 4).background(.bar)
+    }
+    private func sidebarShortcut(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 5) { Image(systemName: icon); Text(title).font(.caption2).lineLimit(1).minimumScaleFactor(0.7) }.frame(maxWidth: .infinity, minHeight: 52)
+        }.accessibilityLabel(title)
+    }
+    private func restoreConversation() async {
+        guard !restoredConversation else { return }; restoredConversation = true
+        #if !SNAPSHOT
+        guard let id = UserDefaults.standard.string(forKey: "last.chat." + HistoryCache.key(api.server)), id.hasPrefix("ses"), path.isEmpty else { return }
+        if let cached: Item<Session> = api.cached("/api/session/" + id) { path = [cached.data]; return }
+        let server = api.server; let connection = api.connectionID
+        do {
+            let item: Item<Session> = try await api.request("/api/session/" + API.escape(id))
+            guard api.server == server, api.connectionID == connection, path.isEmpty, !Task.isCancelled else { return }
+            path = [item.data]
+        } catch { /* An unavailable last chat is not replaced or recreated. */ }
+        #endif
     }
     func loadKzL() async {
         guard !kzlBusy else { return }
@@ -483,11 +516,12 @@ struct ConnectView: View {
         await activity
     }
     func newSession() async {
-        guard directory.hasPrefix("/") else { error = "Use pasta com caminho absoluto, começando por /."; return }
+        guard !busy else { return }
+        busy = true; defer { busy = false }
         do {
-            let response: Item<Session> = try await api.request("/api/session", method: "POST", body: ["location": ["directory": directory]])
+            let response: Item<Session> = try await api.request("/api/session", method: "POST", body: [:])
             sessions.insert(response.data, at: 0)
-            path.append(response.data)
+            path = [response.data]
         } catch { self.error = error.localizedDescription }
     }
     func loadQuota(refresh: Bool = false) async {
@@ -522,6 +556,7 @@ struct ConnectView: View {
     @State private var changingAgent = false
     @State private var controlPanel = false
     @State private var question: QuestionForm?
+    @State private var permissionsPresented = false
     @State private var controlAllowed = false
     @State private var controlSummary = "Consultando automação…"
     @State private var controlCheck = Date.distantPast
@@ -547,10 +582,12 @@ struct ConnectView: View {
     @State private var kzlResultMessages: [Message] = []
     @State private var restoredPosition = false
     private let drafts = DraftStore()
-    init(session: Session) {
+    private let onNewConversation: (() -> Void)?
+    init(session: Session, onNewConversation: (() -> Void)? = nil) {
+        self.onNewConversation = onNewConversation
         _session = State(initialValue: session)
         #if SNAPSHOT
-        _attachments = State(initialValue: [PendingFile(name: "requisitos.txt", mime: "text/plain", data: Data("Projeto de exemplo".utf8))])
+        if !Snapshot.clean { _attachments = State(initialValue: [PendingFile(name: "requisitos.txt", mime: "text/plain", data: Data("Projeto de exemplo".utf8))]) }
         #endif
     }
     var body: some View { lifecycleContent }
@@ -565,10 +602,6 @@ struct ConnectView: View {
         VStack(spacing: 0) {
             controlHeader
             modeHeader
-            if session.isKzL {
-                Button("Tarefas e histórico de voz", systemImage: "checklist") { kzlActivity = true }
-                    .font(.caption).padding(.vertical, 4)
-            }
             connectionStrip
             ForEach(taskHistory.records.filter { record in
                 record.sessionID == session.id && record.serverKey == TaskHistory.serverKey(api.server) &&
@@ -604,7 +637,7 @@ struct ConnectView: View {
             }
     }
     private var modeHeader: some View {
-            HStack(spacing: 10) {
+            HStack {
                 Menu {
                 ForEach(["plan", "build"], id: \.self) { agent in
                     Button {
@@ -620,25 +653,30 @@ struct ConnectView: View {
                         .accessibilityValue((session.agent ?? "build") == agent ? "Selecionado" : "")
                         .accessibilityAddTraits((session.agent ?? "build") == agent ? .isSelected : [])
                 }
+                    Divider()
+                    Button("Escolher modelo e projeto", systemImage: "slider.horizontal.3") { options = true }
+                    Button("Comandos, skills e fila", systemImage: "square.stack") { sessionActions = true }
+                    Button("Alterações e terminal", systemImage: "terminal") { executionDetails = true }
+                    if session.isKzL { Button("Atividade do KzL", systemImage: "checklist") { kzlActivity = true } }
+                    Button("Interromper execução", systemImage: "stop.circle", role: .destructive) { stop = true }
                 } label: {
-                    Label((session.agent ?? "build").capitalized, systemImage: "chevron.down")
-                        .font(.subheadline.weight(.medium))
+                    HStack(spacing: 5) {
+                        Text(PocketDesign.modelName(session.model?.id)).lineLimit(1)
+                        Text("· " + (session.agent ?? "build").capitalized)
+                        Image(systemName: "chevron.down").font(.caption2)
+                    }.font(.subheadline).foregroundStyle(.secondary)
                 }.disabled(changingAgent || store.sending)
                 Spacer(minLength: 0)
-                Button { options = true } label: {
-                    Text(session.model?.id ?? "Modelo").font(.system(.caption, design: .monospaced)).lineLimit(1)
-                }.accessibilityLabel("Selecionar modelo e ajustar conversa")
-            }.padding(.horizontal, 20).padding(.vertical, 8).foregroundStyle(.secondary)
+            }.padding(.horizontal, 20).padding(.vertical, 4)
     }
-    private var connectionStrip: some View {
+    @ViewBuilder private var connectionStrip: some View {
+            if store.showingCache || (store.loadingHistory && !store.refreshed) || api.reachable == false {
             HStack {
-                Label(store.showingCache ? "Histórico salvo" : store.activity, systemImage: store.showingCache ? "internaldrive" : store.liveConnected ? "dot.radiowaves.left.and.right" : "arrow.clockwise")
-                    .foregroundStyle(store.liveConnected ? Color.green : .secondary)
+                Label(api.reachable == false ? "Sem conexão · histórico salvo" : store.showingCache ? "Histórico salvo · atualizando" : "Carregando conversa", systemImage: api.reachable == false ? "wifi.exclamationmark" : "arrow.clockwise")
+                    .foregroundStyle(.secondary)
                 Spacer()
-                if draftError != nil { Text("Rascunho não salvo").foregroundStyle(.red) }
-                else if draftSavedAt != nil && (!draft.isEmpty || !attachments.isEmpty) { Text("Rascunho salvo").foregroundStyle(.secondary) }
-                else if !draft.isEmpty || !attachments.isEmpty { Text("Salvando rascunho…").foregroundStyle(.secondary) }
-            }.font(.caption2).padding(.horizontal).padding(.vertical, 3)
+            }.font(.caption2).padding(.horizontal, 20).padding(.vertical, 5)
+            }
     }
     private var messageTimeline: some View {
             ScrollViewReader { proxy in
@@ -752,21 +790,22 @@ struct ConnectView: View {
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
-                    }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Style.blue.opacity(0.08))
-                }.accessibilityLabel("Responder: \(form.title)")
+                     }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                }.accessibilityLabel("Responder: \(form.title)").padding(.horizontal, 12).padding(.vertical, 4)
             }
     }
     @ViewBuilder private var permissionCards: some View {
             if !store.permissions.isEmpty {
-                ScrollView {
-                    VStack(spacing: 1) {
-            ForEach(store.permissions) { permission in
-                PermissionCard(permission: permission, details: store.permissionDetails[permission.id], strict: session.isPhoneControl) { decision in
-                    await store.reply(api, session: session, permission: permission, decision: decision)
-                }
-            }
-                    }
-                }.frame(maxHeight: 270)
+                Button { permissionsPresented = true } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "hand.raised").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(store.permissions.count == 1 ? "Permissão necessária" : "\(store.permissions.count) permissões pendentes").font(.subheadline.weight(.medium))
+                            Text(store.permissions.first?.message ?? "Confira ação e destino antes de permitir").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(); Text("Revisar").font(.subheadline)
+                    }.padding(14).background(Color.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+                }.foregroundStyle(.primary).padding(.horizontal, 12).padding(.vertical, 4)
             }
     }
     @ViewBuilder private var attachmentStrip: some View {
@@ -784,32 +823,38 @@ struct ConnectView: View {
             }
     }
     private var composer: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                TextField("Mensagem…", text: $draft, axis: .vertical)
-                    .lineLimit(1...6).padding(.horizontal, 8).padding(.top, 8)
-                    .accessibilityLabel("Mensagem").accessibilityIdentifier("chat.composer")
-            HStack(alignment: .center, spacing: 16) {
+            HStack(alignment: .bottom, spacing: 2) {
                 Menu {
-                    Button("Buscar no histórico completo", systemImage: "text.magnifyingglass") { showFullSearch = true }
-                    Button("Comandos, skills e fila", systemImage: "slider.horizontal.3") { sessionActions = true }
-                    Button("Agendamentos", systemImage: "calendar.badge.clock") { sessionActions = true }
+                    Section("Anexar") {
+                        Button("Fotos", systemImage: "photo") { selectingPhotos = true }.disabled(attachments.count >= 5)
+                        Button("Arquivo", systemImage: "paperclip") { selectingFiles = true }.disabled(attachments.count >= 5)
+                    }
+                    Section("Conversa") {
+                    Button("Buscar no histórico", systemImage: "text.magnifyingglass") { showFullSearch = true }
+                    Button("Comandos e skills", systemImage: "slider.horizontal.3") { sessionActions = true }
+                    Button("Arquivos do projeto", systemImage: "folder") { fileBrowser = true }
                     Button("Favoritar projeto", systemImage: "star") {
                         do { try projects.add(server: api.server, name: URL(fileURLWithPath: session.location.directory).lastPathComponent.isEmpty ? "Projeto" : URL(fileURLWithPath: session.location.directory).lastPathComponent, directory: session.location.directory) }
                         catch { store.sendError = error.localizedDescription }
                     }
-                    Button("Buscar nesta conversa", systemImage: "magnifyingglass") { showChatSearch.toggle(); if !showChatSearch { chatQuery = "" } }
-                    Button("Arquivos", systemImage: "folder") { selectingFiles = true }
-                    Button("Fotos", systemImage: "photo") { selectingPhotos = true }
+                    }
                 } label: {
                     Image(systemName: importing ? "hourglass" : "plus").font(.system(size: 22)).frame(width: 44, height: 44)
-                }.disabled(importing || store.sending || attachments.count >= 5).accessibilityLabel("Anexar fotos ou arquivos")
-                Spacer()
-                Button { voiceCall = true } label: {
-                    Image(systemName: "waveform").font(.system(size: 22)).frame(width: 44, height: 44)
-                }.accessibilityLabel("Conversar por voz")
+                }.disabled(importing || store.sending).accessibilityLabel("Anexos e ferramentas")
+                TextField("Mensagem", text: $draft, axis: .vertical)
+                    .lineLimit(1...5).padding(.vertical, 12).padding(.horizontal, 4)
+                    .accessibilityLabel("Mensagem").accessibilityIdentifier("chat.composer")
+                Button {
+                    if session.isKzL { KzLCallCoordinator.shared.prepare(api: api, session: session) }
+                    else { voiceCall = true }
+                } label: {
+                    Image(systemName: session.isKzL ? "phone" : "waveform").font(.system(size: 20)).frame(width: 44, height: 44)
+                }.accessibilityLabel(session.isKzL ? "Ligar para KzL" : "Live desta conversa")
                 Button {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     let submitted = attachments
+                    scroll.latest()
+                    UserDefaults.standard.removeObject(forKey: "chat.position." + HistoryCache.key(api.server + "|" + session.id))
                     Task {
                         if await store.send(api, session: session, text: text, files: submitted) {
                             if draft.trimmingCharacters(in: .whitespacesAndNewlines) == text { draft = "" }
@@ -817,11 +862,14 @@ struct ConnectView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: store.sending ? "ellipsis" : "arrow.up.circle.fill").font(.system(size: 36))
+                    Image(systemName: store.sending ? "ellipsis" : "arrow.up")
+                        .font(.system(size: 17, weight: .semibold)).frame(width: 36, height: 36)
+                        .foregroundStyle(Color(uiColor: .systemBackground)).background(Color.primary, in: Circle())
+                        .frame(width: 44, height: 44)
                 }.disabled(store.sending || importing || changingAgent || api.reachable == false || (session.isPhoneControl && !controlAllowed) || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty))
-                    .accessibilityLabel("Enviar mensagem")
-            }
-            }.padding(8).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 28))
+                     .accessibilityLabel("Enviar mensagem")
+                     .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty ? 0.35 : 1)
+            }.padding(6).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 28))
                 .padding(.horizontal, 12).padding(.vertical, 8).background(Color(uiColor: .systemBackground))
     }
     private var navigationContent: some View {
@@ -829,12 +877,8 @@ struct ConnectView: View {
         .navigationTitle(session.isKzL ? "Agente KzL" : session.title ?? "Conversa").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button("Nome, modo e modelo", systemImage: "slider.horizontal.3") { options = true }
-                    Button("Alterações e terminal", systemImage: "terminal") { executionDetails = true }
-                    Button("Arquivos do projeto", systemImage: "folder") { fileBrowser = true }
-                    Button("Interromper tarefa", systemImage: "stop.circle", role: .destructive) { stop = true }
-                } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Opções da conversa")
+                if let onNewConversation { Button("Nova conversa", systemImage: "square.and.pencil", action: onNewConversation) }
+                else { Button("Opções da conversa", systemImage: "slider.horizontal.3") { options = true } }
             }
         }
     }
@@ -842,6 +886,21 @@ struct ConnectView: View {
         navigationContent
         .sheet(isPresented: $options) { ChatOptionsView(session: $session) }
         .sheet(isPresented: $controlPanel) { PhoneControlView() }
+        .sheet(isPresented: $permissionsPresented) {
+            NavigationStack {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(store.permissions) { permission in
+                            PermissionCard(permission: permission, details: store.permissionDetails[permission.id], strict: session.isPhoneControl) { decision in
+                                await store.reply(api, session: session, permission: permission, decision: decision)
+                                if store.permissions.isEmpty { permissionsPresented = false }
+                            }
+                        }
+                    }.padding(.vertical)
+                }.navigationTitle("Permissões").navigationBarTitleDisplayMode(.inline)
+                    .toolbar { Button("Fechar") { permissionsPresented = false } }
+            }
+        }
         .sheet(isPresented: $showFullSearch) { FullChatSearchView(sessionID: session.id) }
         .sheet(isPresented: $voiceCall) { VoiceCallView(session: session) }
         .sheet(isPresented: $sessionActions) { SessionActionsView(session: session) }
@@ -1021,27 +1080,32 @@ struct MessageView: View {
     let message: Message
     var assistantLabel = "OPENCODE"
     private var toolCount: Int { (message.content ?? []).filter { $0.type == "tool" }.count }
+    private var toolsLabel: String {
+        let states = (message.content ?? []).filter { $0.type == "tool" }.compactMap { $0.state?.status }
+        let label = states.contains("error") ? "Falha em ferramenta" : states.contains(where: { ["running", "streaming"].contains($0) }) ? "Trabalhando" : "Etapas concluídas"
+        return label + " · \(toolCount)"
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                if message.type != "user" { Text(assistantLabel == "OPENCODE" ? "OpenCode" : assistantLabel).font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
-                Spacer()
-                if message.type == "assistant" && message.time.completed == nil { ProgressView().controlSize(.mini).accessibilityLabel("Em execução") }
-            }
             if let text = message.text { MarkdownMessage(text: text) }
             if let failure = message.error {
                 Label(failure.message ?? "Modelo não conseguiu responder. Confira conta e modelo nos ajustes do chat.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.red).textSelection(.enabled)
             }
             ForEach(Array((message.files ?? []).enumerated()), id: \.offset) { _, file in
-                Label(file.name ?? file.mime, systemImage: file.mime.hasPrefix("image/") ? "photo" : "paperclip")
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Image(systemName: file.mime.hasPrefix("image/") ? "photo" : "doc").font(.title3)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(file.name ?? "Arquivo anexado").font(.subheadline.weight(.medium)).lineLimit(1)
+                        Text(file.mime).font(.caption).foregroundStyle(.secondary)
+                    }
+                }.padding(12).background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
             }
             ForEach(Array((message.content ?? []).filter { $0.type == "text" }.enumerated()), id: \.offset) { _, part in
                 if let text = part.text { MarkdownMessage(text: text) }
             }
             if toolCount > 0 {
-            DisclosureGroup("Ferramentas · \(toolCount) etapas") {
+            DisclosureGroup(toolsLabel) {
             ForEach(Array((message.content ?? []).filter { $0.type == "tool" }.enumerated()), id: \.offset) { _, part in
                 if part.type == "text", let text = part.text {
                     MarkdownMessage(text: text)
@@ -1061,7 +1125,8 @@ struct MessageView: View {
             }.font(.subheadline).tint(.secondary)
             }
         }
-        .padding(message.type == "user" ? 16 : 2).frame(maxWidth: .infinity, alignment: .leading)
+        .font(.body).lineSpacing(4)
+        .padding(message.type == "user" ? 14 : 2).frame(maxWidth: .infinity, alignment: .leading)
         .background(message.type == "user" ? Color(uiColor: .secondarySystemBackground) : Color.clear, in: RoundedRectangle(cornerRadius: 24))
         .padding(.leading, message.type == "user" ? 44 : 0)
         .contextMenu { Button("Copiar mensagem", systemImage: "doc.on.doc") { UIPasteboard.general.string = ([message.text ?? ""] + (message.content ?? []).compactMap(\.text)).joined(separator: "\n") } }
@@ -1105,11 +1170,13 @@ struct SettingsView: View {
                 Section("Manutenção") {
                     NavigationLink("Tarefas deste iPhone") { TaskHistoryView() }
                     NavigationLink("Central de transferências") { TransferCenterView() }
+                    NavigationLink("Pasta automática do iPhone") { InboxSyncView() }
                     NavigationLink("Energia · desligar notebook") { NotebookPowerView() }
                     NavigationLink("Voz · OpenAI Realtime") { VoiceSettingsView() }
                     NavigationLink("Notificações opcionais") { NotificationSettingsView() }
                     NavigationLink("Aparelhos pareados") { PairedDevicesView() }
                     NavigationLink("Diagnóstico e atualização") { MaintenanceView() }
+                    NavigationLink("Controle do iPhone · experimental") { PhoneControlView() }
                 }
                 Button("Desconectar este iPhone", role: .destructive) { api.disconnect(); dismiss() }
             }

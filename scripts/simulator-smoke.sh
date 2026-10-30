@@ -21,19 +21,37 @@ xcrun --sdk iphonesimulator swiftc -swift-version 5 -parse-as-library -D SNAPSHO
   -o "$APP/OpenCodePocket"
 cp ios/Info.plist "$APP/Info.plist"
 cp ios/PrivacyInfo.xcprivacy "$APP/PrivacyInfo.xcprivacy"
+cp ios/Resources/KzL.png "$APP/KzL.png"
 python3 scripts/icon.py "$APP"
-DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for k,values in d["devices"].items() if "iOS" in k for v in values if "iPhone" in v["name"]))')
+DEVICE=$(python3 - <<'PY'
+import json, subprocess
+def read(*args): return json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', *args, '-j']))
+types = read('devicetypes')['devicetypes']
+phone = next((t['identifier'] for t in types if t['name'] == 'iPhone 11'), None)
+runtimes = [r for r in read('runtimes')['runtimes'] if r.get('isAvailable') and r['name'].startswith('iOS')]
+if phone and runtimes:
+    for runtime in sorted(runtimes, key=lambda r: tuple(map(int, r['version'].split('.'))), reverse=True):
+        result = subprocess.run(['xcrun', 'simctl', 'create', 'Pocket iPhone 11', phone, runtime['identifier']], text=True, capture_output=True)
+        if result.returncode == 0:
+            print(result.stdout.strip())
+            raise SystemExit(0)
+devices = read('devices', 'available')['devices']
+print(next(d['udid'] for key, group in devices.items() if 'iOS' in key for d in group if 'iPhone' in d['name']))
+PY
+)
 xcrun simctl boot "$DEVICE"
 xcrun simctl bootstatus "$DEVICE" -b
 xcrun simctl install "$DEVICE" "$APP"
-for SCREEN in onboarding chat options models control sessions question files inbox; do
+xcrun simctl status_bar "$DEVICE" override --time '9:41' --batteryState charged --batteryLevel 100
+defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+for SCREEN in ${UI_SCREEN_LIST:-onboarding conversation sidebar call live chat options models control sessions question files inbox}; do
   xcrun simctl launch "$DEVICE" com.omokir.opencodepocket "--snapshot-$SCREEN"
   sleep 3
   xcrun simctl io "$DEVICE" screenshot "build/iphone-$SCREEN.png"
   xcrun simctl terminate "$DEVICE" com.omokir.opencodepocket
 done
 
-if [ "${SNAPSHOTS_ONLY:-0}" = "1" ]; then exit 0; fi
+if [ "${SNAPSHOTS_ONLY:-0}" = "1" ] && [ "${UI_INTERACTIONS:-0}" != "1" ]; then exit 0; fi
 
 # Interaction test, not a fixture screenshot: open the actual system picker.
 npm install --prefix build/ui-tools --no-audit --no-fund mobilecli@1.0.21
@@ -41,11 +59,4 @@ CLI="$PWD/build/ui-tools/node_modules/.bin/mobilecli"
 export MOBILECLI_HOME="$PWD/build/mobilecli-simulator"
 "$CLI" agent install --device "$DEVICE"
 "$CLI" device info --device "$DEVICE" > build/simulator-device-info.json
-xcrun simctl addmedia "$DEVICE" "$APP/Artwork.png"
-xcrun simctl launch "$DEVICE" com.omokir.opencodepocket --snapshot-chat
-python3 scripts/photo-picker-smoke.py "$CLI" "$DEVICE"
-xcrun simctl terminate "$DEVICE" com.omokir.opencodepocket
-xcrun simctl launch "$DEVICE" com.omokir.opencodepocket --snapshot-sessions
-python3 scripts/pins-smoke.py "$CLI" "$DEVICE"
-xcrun simctl terminate "$DEVICE" com.omokir.opencodepocket
-python3 scripts/chat-files-smoke.py "$CLI" "$DEVICE"
+python3 scripts/design-smoke.py "$CLI" "$DEVICE"

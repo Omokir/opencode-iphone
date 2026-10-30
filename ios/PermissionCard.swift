@@ -7,10 +7,12 @@ struct PermissionCard: View {
     let reply: (String) async -> Void
     @State private var confirm = false
     @State private var busy = false
+    @State private var expanded = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("A IA aguarda sua autorização", systemImage: "hand.raised.fill").font(.headline)
-            Text(permission.message ?? permission.action).font(.subheadline).textSelection(.enabled)
+            Label("Permissão necessária", systemImage: "hand.raised").font(.subheadline.weight(.semibold))
+            Text(permission.message ?? permission.action).font(.subheadline).lineLimit(expanded ? nil : 2).textSelection(.enabled)
+            if expanded {
             Text(permission.resources.joined(separator: "\n")).font(.system(.caption2, design: .monospaced)).lineLimit(4)
             if let details, !details.isEmpty {
                 DisclosureGroup("Ver ação solicitada") {
@@ -21,14 +23,20 @@ struct PermissionCard: View {
                 Text("Detalhes ainda não disponíveis. Aguarde atualização ou confira no notebook; permitir fica bloqueado.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            }
             HStack {
                 Button("Negar", role: .destructive) { answer("reject") }.disabled(busy)
                 Spacer()
-                Button("Revisar e permitir") { confirm = true }
-                    .buttonStyle(.borderedProminent).disabled(busy || (strict && details?.isEmpty != false))
+                if expanded {
+                    Button("Permitir uma vez") { confirm = true }
+                        .buttonStyle(.bordered).disabled(busy || (strict && details?.isEmpty != false))
+                } else {
+                    Button("Revisar") { expanded = true }.buttonStyle(.bordered).disabled(busy)
+                }
             }
         }
-        .padding().background(Color.orange.opacity(0.12))
+        .padding(14).background(Color.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 12).padding(.vertical, 4)
         .confirmationDialog("Autorizar somente esta ação?", isPresented: $confirm, titleVisibility: .visible) {
             Button("Permitir uma vez") { answer("once") }
             Button("Cancelar", role: .cancel) { }

@@ -21,6 +21,7 @@ xcrun --sdk iphoneos swiftc -swift-version 5 -parse-as-library -O \
   -o "$APP/OpenCodePocket"
 cp ios/Info.plist "$APP/Info.plist"
 cp ios/PrivacyInfo.xcprivacy "$APP/PrivacyInfo.xcprivacy"
+cp ios/Resources/KzL.png "$APP/KzL.png"
 python3 scripts/icon.py "$APP"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleSupportedPlatforms array' "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleSupportedPlatforms:0 string iPhoneOS' "$APP/Info.plist"
