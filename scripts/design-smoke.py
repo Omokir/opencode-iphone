@@ -49,9 +49,13 @@ subprocess.run(['xcrun', 'simctl', 'ui', device, 'appearance', 'dark'], check=Tr
 shot('conversation-dark')
 tap(lambda e: e.get('identifier') == 'chat.composer' or (e.get('type') in ('TextField', 'TextView') and label(e) == 'Mensagem'))
 command('io', 'fill', 'Rascunho visual, sem enviar.')
-wait(lambda e: e.get('type') == 'Keyboard')
-wait(lambda e: 'Pronto para revisar.' in label(e))
-shot('conversation-keyboard')
+try:
+    # Device Kit exposes actual keys, not always a parent Keyboard element.
+    wait(lambda e: e.get('type') == 'Key' and label(e) in ('space', 'espaço'))
+    wait(lambda e: e.get('type') == 'Key' and label(e) == 'delete')
+    wait(lambda e: 'Pronto para revisar.' in label(e))
+finally:
+    shot('conversation-keyboard')
 print('PASS: keyboard and draft input keep fixture history in native hierarchy; no prompt sent.', flush=True)
 
 launch('sidebar')

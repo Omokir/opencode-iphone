@@ -51,6 +51,13 @@ import Combine
         if speaking { return "Ouvindo você" }
         return "Pode falar"
     }
+    #if SNAPSHOT
+    /// Layout-only state: no peer, microphone, API connection or call UUID.
+    func previewCallState() {
+        connecting = false; active = true; muted = false; remotePlaying = false
+        elapsedSeconds = 42; status = "Pode falar"
+    }
+    #endif
 
     func start(_ api: API, session: Session, monitor: ChatStore, systemCall: Bool = false) async {
         guard !open else { return }

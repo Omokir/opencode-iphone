@@ -225,7 +225,6 @@ struct ConnectView: View {
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 Section {
                     Button("Nova conversa", systemImage: "square.and.pencil") { Task { await newSession() } }.disabled(busy)
-                    Button("Buscar conversas", systemImage: "magnifyingglass") { searchPresented = true }
                     Button("Projetos favoritos", systemImage: "star") { projectPicker = true }
                 }
                 if cachedList { Text("Histórico salvo · atualizando").font(.caption).foregroundStyle(.secondary) }
@@ -284,9 +283,6 @@ struct ConnectView: View {
                 searchBusy = true
                 do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
                 await search()
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Nova conversa", systemImage: "square.and.pencil") { Task { await newSession() } }.disabled(busy) }
             }
             .overlay { if busy && sessions.isEmpty { ProgressView() } }
             .refreshable { await load(resetPagination: true) }

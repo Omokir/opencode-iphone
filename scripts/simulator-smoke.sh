@@ -1,5 +1,15 @@
 #!/bin/bash
 set -euo pipefail
+timed() {
+  python3 - "$@" <<'PY'
+import subprocess, sys, time
+seconds = int(sys.argv[1]); command = sys.argv[2:]
+started = time.monotonic()
+print('UI command:', ' '.join(command), flush=True)
+subprocess.run(command, check=True, timeout=seconds)
+print('UI command finished in', round(time.monotonic() - started, 1), 'seconds', flush=True)
+PY
+}
 cd "$(dirname "$0")/.."
 APP=build/simulator/OpenCodePocket.app
 mkdir -p "$APP"
@@ -39,13 +49,14 @@ devices = read('devices', 'available')['devices']
 print(next(d['udid'] for key, group in devices.items() if 'iOS' in key for d in group if 'iPhone' in d['name']))
 PY
 )
-xcrun simctl boot "$DEVICE"
-xcrun simctl bootstatus "$DEVICE" -b
-xcrun simctl install "$DEVICE" "$APP"
-xcrun simctl status_bar "$DEVICE" override --time '9:41' --batteryState charged --batteryLevel 100
+timed 60 xcrun simctl boot "$DEVICE"
 defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+open -a "$(xcode-select -p)/Applications/Simulator.app" --args -CurrentDeviceUDID "$DEVICE"
+timed 300 xcrun simctl bootstatus "$DEVICE" -b
+timed 180 xcrun simctl install "$DEVICE" "$APP"
+xcrun simctl status_bar "$DEVICE" override --time '9:41' --batteryState charged --batteryLevel 100
 for SCREEN in ${UI_SCREEN_LIST:-onboarding conversation sidebar call live chat options models control sessions question files inbox}; do
-  xcrun simctl launch "$DEVICE" com.omokir.opencodepocket "--snapshot-$SCREEN"
+  timed 360 xcrun simctl launch "$DEVICE" com.omokir.opencodepocket "--snapshot-$SCREEN"
   sleep 3
   xcrun simctl io "$DEVICE" screenshot "build/iphone-$SCREEN.png"
   xcrun simctl terminate "$DEVICE" com.omokir.opencodepocket

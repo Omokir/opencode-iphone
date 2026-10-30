@@ -4,7 +4,7 @@ import Foundation
 import SwiftUI
 
 @MainActor enum Snapshot {
-    static var clean: Bool { ["--snapshot-conversation", "--snapshot-sidebar", "--snapshot-call", "--snapshot-live"].contains { ProcessInfo.processInfo.arguments.contains($0) } }
+    static var clean: Bool { ["--snapshot-conversation", "--snapshot-sidebar", "--snapshot-call", "--snapshot-call-active", "--snapshot-live"].contains { ProcessInfo.processInfo.arguments.contains($0) } }
     static var created: [String: [String: Any]] = [:]
     static var object: [String: Any] = {
         var value: [String: Any] = [
@@ -15,6 +15,8 @@ import SwiftUI
         "model": ["providerID": "openai", "id": "gpt-6.1-sol-ultrafast"]
         ]
         if clean {
+            let screen = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--snapshot-") }) ?? "design"
+            value["id"] = "ses_design_" + screen.replacingOccurrences(of: "--snapshot-", with: "").replacingOccurrences(of: "-", with: "_")
             value["title"] = "Uma ideia, do começo ao fim"
             value["metadata"] = [:] as [String: Bool]
             value["model"] = ["providerID": "openai", "id": "gpt-6.1-terra-fast"]
@@ -139,6 +141,9 @@ struct SnapshotRoot: View {
         if arguments.contains("--snapshot-conversation") { NavigationStack { ChatView(session: session, onNewConversation: {}) } }
         else if arguments.contains("--snapshot-sidebar") { SnapshotConversationsView() }
         else if arguments.contains("--snapshot-call") { KzLCallScreen(session: Snapshot.kzlSession) }
+        else if arguments.contains("--snapshot-call-active") {
+            KzLCallScreen(session: Snapshot.kzlSession).onAppear { KzLCallCoordinator.shared.voice.previewCallState() }
+        }
         else if arguments.contains("--snapshot-live") { VoiceCallView(session: session) }
         else if arguments.contains("--snapshot-chat") { NavigationStack { ChatView(session: session) } }
         else if arguments.contains("--snapshot-sessions") { SnapshotConversationsView() }
