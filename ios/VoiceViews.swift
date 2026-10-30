@@ -173,7 +173,15 @@ struct VoiceCallView: View {
                 .sheet(item: $question) { form in QuestionFormView(question: form, session: session) { Task { await monitor.refresh(api, session: session) } } }
                 .sheet(item: $taskToReview) { task in NavigationStack { KzLTaskDestination(id: task.child).toolbar { Button("Voltar à ligação") { taskToReview = nil } } } }
                 .confirmationDialog("Iniciar chamada com API paga?", isPresented: $consent, titleVisibility: .visible) {
-                    Button("Ligar via OpenCode do notebook") { Task { if !soundTest.running { await voice.start(api, session: session, monitor: monitor) } } }
+                    Button("Ligar via OpenCode do notebook") { Task {
+                        guard !soundTest.running else { return }
+                        if session.isKzL {
+                            await KzLCallCoordinator.shared.start(api: api, session: session)
+                            if KzLCallCoordinator.shared.callID != nil { dismiss() }
+                            else { voice.error = KzLCallCoordinator.shared.error }
+                        } else if KzLCallCoordinator.shared.callID == nil { await voice.start(api, session: session, monitor: monitor) }
+                        else { voice.error = "Encerre ligação KzL antes de abrir Live de outro chat." }
+                    } }
                     Button("Cancelar", role: .cancel) { }
                 } message: { Text(session.isKzL ? "Microfone e contexto do KzL serão enviados à OpenAI; texto de voz é salvo no notebook. API paga. Pedidos podem iniciar tarefas com permissões existentes. Não diga senhas. A ligação ainda encerra em segundo plano nesta versão." : "Live usa contexto e agente desta conversa, sem redirecionar para KzL. Microfone e contexto serão enviados à OpenAI; API paga. Pedidos podem iniciar tarefas com permissões existentes. Não diga senhas. Live encerra em segundo plano.") }
                 .alert("Interromper tarefa no notebook?", isPresented: $interruptTask) {

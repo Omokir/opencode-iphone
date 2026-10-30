@@ -26,6 +26,7 @@ from resume import ResumableInbox
 from inbox import PhoneInbox
 from storage import storage_status
 from kzl import KzL, KzLError
+from computer_activity import project as computer_steps, image_bytes
 
 STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
@@ -43,7 +44,7 @@ RULES = {
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
             r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices', r'/phone/power/status',
              r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)',
-              r'/phone/kzl/(context|tasks|capabilities|memory|events)', r'/api/(command|skill)',
+              r'/phone/kzl/(context|tasks|capabilities|memory|events)', r'/phone/kzl/task/job_[A-Za-z0-9_-]+/computer(?:/image)?', r'/api/(command|skill)',
               r'/api/session/ses[^/]+/(inbox|diff)', r'/api/experimental/schedule', r'/api/permission/request', r'/api/form',
               r'/api/experimental/session/ses[^/]+/terminal/read'],
     'POST': [r'/api/experimental/voice/session', r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
@@ -438,6 +439,23 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length) if length else None
             if path.startswith('/phone/kzl/'):
                 coordinator = self.server.kzl
+                activity = re.fullmatch(r'/phone/kzl/task/(job_[A-Za-z0-9_-]+)/computer(/image)?', path)
+                if activity:
+                    task = coordinator._row(activity[1])
+                    sid = task['child']
+                    if not activity[2]:
+                        messages = coordinator.request('GET', '/api/session/' + sid + '/message?limit=100&order=desc')
+                        return self.reply(200, {'steps': computer_steps(messages), 'source': 'recorded_tools', 'liveScreen': False})
+                    query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                    mid = query.get('message', [''])[0]; tid = query.get('tool', [''])[0]
+                    if not re.fullmatch(r'msg_[A-Za-z0-9_-]{1,160}', mid) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', tid):
+                        return self.reply(400, {'error': 'Invalid recorded image reference'})
+                    message = coordinator.request('GET', '/api/session/' + sid + '/message/' + mid)
+                    mime, data = image_bytes(message, tid, int(query.get('index', ['-1'])[0]))
+                    self.send_response(200); self.send_header('Content-Type', mime)
+                    self.send_header('Content-Length', str(len(data))); self.send_header('Cache-Control', 'no-store')
+                    self.end_headers(); self.wfile.write(data)
+                    return
                 if path == '/phone/kzl/ensure':
                     return self.reply(200, {'data': coordinator.ensure()})
                 if path == '/phone/kzl/context':

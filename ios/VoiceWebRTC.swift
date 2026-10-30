@@ -15,8 +15,10 @@ final class VoiceWebRTC: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
     var onFailure: (() -> Void)?
     var onReady: (() -> Void)?
     private var closed = false
+    private let systemCall: Bool
 
-    override init() {
+    init(systemCall: Bool = false) {
+        self.systemCall = systemCall
         super.init()
         let config = RTCConfiguration()
         config.sdpSemantics = .unifiedPlan
@@ -35,7 +37,7 @@ final class VoiceWebRTC: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
             defer { audio.unlockForConfiguration() }
             try audio.setCategory(.playAndRecord, with: [.allowBluetooth, .defaultToSpeaker])
             try audio.setMode(.voiceChat)
-            try audio.setActive(true)
+            if !systemCall { try audio.setActive(true) }
         }
         let offer: RTCSessionDescription = try await withCheckedThrowingContinuation { continuation in
             peer.offer(for: RTCMediaConstraints(mandatoryConstraints: ["OfferToReceiveAudio": "true"], optionalConstraints: nil)) { sdp, error in
@@ -82,7 +84,7 @@ final class VoiceWebRTC: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDele
         onEvent = nil; onFailure = nil; onReady = nil
         channel?.delegate = nil; channel?.close(); peer?.delegate = nil; peer?.close()
         let audio = RTCAudioSession.sharedInstance(); audio.lockForConfiguration()
-        try? audio.setActive(false); audio.unlockForConfiguration()
+        if !systemCall { try? audio.setActive(false) }; audio.unlockForConfiguration()
     }
     func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
         if dataChannel.readyState == .open { onReady?() }

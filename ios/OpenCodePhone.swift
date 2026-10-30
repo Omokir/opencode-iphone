@@ -15,6 +15,7 @@ struct OpenCodePhoneApp: App {
     @StateObject private var inbox = InboxSync()
     @StateObject private var api = API()
     @StateObject private var privacy = PrivacyLock()
+    @StateObject private var call = KzLCallCoordinator.shared
     @StateObject private var projects = ProjectFavorites()
     @StateObject private var receiver = DocumentReceiver.shared
     #if SNAPSHOT
@@ -41,6 +42,14 @@ struct OpenCodePhoneApp: App {
             .environmentObject(inbox)
             .environmentObject(privacy)
             .environmentObject(projects)
+            .overlay(alignment: .top) {
+                if call.callID != nil && privacy.allowsAccess && !call.presented {
+                    Button("Voltar à ligação KzL", systemImage: "phone.fill") { call.presented = true }
+                        .buttonStyle(.borderedProminent).tint(.red).padding(.top, 8)
+                }
+            }
+            .fullScreenCover(isPresented: Binding(get: { call.presented && privacy.allowsAccess }, set: { call.presented = $0 })) { KzLCallScreen().environmentObject(api) }
+            .onChange(of: api.connectionID) { _, _ in call.end() }
             .onOpenURL { url in receiver.offer(url) }
             .sheet(item: Binding(get: { privacy.allowsAccess ? receiver.incoming : nil }, set: { if $0 == nil && privacy.allowsAccess { receiver.close() } })) { item in DocumentImportView(item: item) }
             .onChange(of: phase) { _, value in if value == .background { privacy.lock() } }

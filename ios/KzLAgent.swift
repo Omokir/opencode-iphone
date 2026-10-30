@@ -82,6 +82,7 @@ struct KzLTasksView: View {
             Section("Tarefas persistentes") {
                 if tasks.isEmpty { Text("Nenhuma tarefa delegada ainda.").foregroundStyle(.secondary) }
                 ForEach(tasks) { task in
+                    NavigationLink("Ver atividade do computador") { ComputerActivityView(task: task) }
                     NavigationLink { KzLTaskDestination(id: task.child) } label: {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(task.text).lineLimit(2)
