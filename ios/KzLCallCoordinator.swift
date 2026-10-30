@@ -30,7 +30,9 @@ import WebRTC
         config.supportedHandleTypes = [.generic]; config.includesCallsInRecents = false
         provider = CXProvider(configuration: config)
         super.init()
+        #if !SNAPSHOT
         provider.setDelegate(self, queue: .main)
+        #endif
         observation = voice.objectWillChange.sink { [weak self] in
             Task { @MainActor in
                 guard let self else { return }

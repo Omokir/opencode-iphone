@@ -58,7 +58,7 @@ struct KzLCallScreen: View {
                                 Image(systemName: voice.muted ? "mic.slash.fill" : "mic.fill").font(.system(size: 23)).frame(width: 64, height: 64).background(.white.opacity(voice.muted ? 0.18 : 0.08), in: Circle())
                                 Text(voice.muted ? "Ativar" : "Silenciar").font(.caption).foregroundStyle(.secondary)
                             }
-                        }.foregroundStyle(.white)
+                        }.foregroundStyle(.white).accessibilityLabel(voice.muted ? "Ativar microfone" : "Silenciar microfone")
                     }
                 } else {
                     Button { requestCall() } label: { Label("Ligar para KzL", systemImage: "phone.fill").font(.headline).padding(.horizontal, 24).frame(minHeight: 54) }
