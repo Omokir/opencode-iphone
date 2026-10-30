@@ -6,7 +6,7 @@ import WebRTC
 
 /// Outgoing call owner, independent of sheets and privacy overlays.
 /// No incoming push or automatic paid reconnect.
-@MainActor final class KzLCallCoordinator: NSObject, ObservableObject, CXProviderDelegate {
+@MainActor final class KzLCallCoordinator: NSObject, ObservableObject, @preconcurrency CXProviderDelegate {
     static let shared = KzLCallCoordinator()
     let voice = RealtimeVoiceStore()
     private let monitor = ChatStore()
@@ -58,7 +58,7 @@ import WebRTC
                 end()
             }
         }
-        catch { error = "iOS não autorizou iniciar ligação. Nenhuma sessão de voz criada."; finishSystemCall() }
+        catch { self.error = "iOS não autorizou iniciar ligação. Nenhuma sessão de voz criada."; finishSystemCall() }
     }
     func end() { startTask?.cancel(); startTask = nil; voice.end(); finishSystemCall() }
     private func finishSystemCall() {
