@@ -702,7 +702,10 @@ struct ConnectView: View {
                             }.id(message.id)
                         }
                         if timelineMessages.isEmpty && store.refreshed {
-                            ContentUnavailableView("Converse com notebook", systemImage: "text.bubble", description: Text("Envie tarefa para começar."))
+                            VStack(spacing: 10) {
+                                Text("Como posso ajudar?").font(.title3.weight(.semibold))
+                                Text("Envie uma mensagem ou anexe um arquivo.").font(.subheadline).foregroundStyle(.secondary)
+                            }.frame(maxWidth: .infinity).padding(.vertical, 48)
                         } else if timelineMessages.isEmpty && store.loadingHistory {
                             ProgressView("Carregando histórico…").frame(maxWidth: .infinity).padding(.vertical, 24)
                         }
@@ -1009,7 +1012,7 @@ struct ConnectView: View {
         }
     }
     func markReadIfVisible(_ snapshot: Session) {
-        if phase == .active && store.error == nil && !voiceCall && !options && !controlPanel && !fileBrowser && preview == nil && !selectingFiles && !selectingPhotos && question == nil {
+        if phase == .active && store.error == nil && !voiceCall && !permissionsPresented && !options && !controlPanel && !fileBrowser && preview == nil && !selectingFiles && !selectingPhotos && question == nil {
             unread.markRead(snapshot, server: api.server)
         }
     }
