@@ -26,7 +26,7 @@ from resume import ResumableInbox
 from inbox import PhoneInbox
 from storage import storage_status
 from kzl import KzL, KzLError
-from computer_activity import project as computer_steps, image_bytes
+from computer_activity import task_steps, task_image
 
 STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
@@ -444,14 +444,13 @@ class Handler(BaseHTTPRequestHandler):
                     task = coordinator._row(activity[1])
                     sid = task['child']
                     if not activity[2]:
-                        messages = coordinator.request('GET', '/api/session/' + sid + '/message?limit=100&order=desc')
-                        return self.reply(200, {'steps': computer_steps(messages), 'source': 'recorded_tools', 'liveScreen': False})
+                        return self.reply(200, {'steps': task_steps(coordinator.request, sid), 'source': 'recorded_tools', 'liveScreen': False})
                     query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                     mid = query.get('message', [''])[0]; tid = query.get('tool', [''])[0]
                     if not re.fullmatch(r'msg_[A-Za-z0-9_-]{1,160}', mid) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', tid):
                         return self.reply(400, {'error': 'Invalid recorded image reference'})
-                    message = coordinator.request('GET', '/api/session/' + sid + '/message/' + mid)
-                    mime, data = image_bytes(message, tid, int(query.get('index', ['-1'])[0]))
+                    selected = query.get('session', [sid])[0]
+                    mime, data = task_image(coordinator.request, sid, selected, mid, tid, int(query.get('index', ['-1'])[0]))
                     self.send_response(200); self.send_header('Content-Type', mime)
                     self.send_header('Content-Length', str(len(data))); self.send_header('Cache-Control', 'no-store')
                     self.end_headers(); self.wfile.write(data)

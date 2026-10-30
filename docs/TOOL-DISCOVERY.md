@@ -36,3 +36,17 @@ Read-only end-to-end test on 2026-10-30 confirmed:
 No click, typing, screenshot, file reading or application change was requested.
 This validates discovery and one read-only delegation, not full desktop workflows
 or iPhone audio/keyboard behavior. Physical testing remains required.
+
+## Delegated activity (0.15.2)
+
+The activity endpoint traverses verified Core parent links (maximum 3 levels and
+20 sessions) and projects recorded worker tool steps, not only coordinator steps.
+Each step carries its source session ID. Screenshot requests recheck that source
+against task ancestry before reading the message. Foreign sessions and forged
+parent links are rejected; no client-provided path or URL is fetched.
+
+Fixture tests cover delegated inline screenshots and cross-task rejection. The
+live gateway found the completed `linux_computer_apps` step in the actual Terra
+Fast worker session from the read-only integration test. That test generated no
+screenshots, so physical capture/rendering remains unverified. The bounded recent
+page is not an exhaustive export of every historical action.

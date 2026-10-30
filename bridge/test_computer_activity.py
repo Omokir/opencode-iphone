@@ -1,6 +1,6 @@
 import base64
 import unittest
-from computer_activity import project, image_bytes
+from computer_activity import project, image_bytes, task_steps, task_image
 
 class ActivityTests(unittest.TestCase):
     def message(self, uri):
@@ -24,3 +24,22 @@ class ActivityTests(unittest.TestCase):
         with self.assertRaises(ValueError): image_bytes(message, 'call_test', 0)
         message['content'][0]['name'] = 'read'
         self.assertEqual(project([message]), [])
+
+    def test_worker_steps_and_capture_require_real_parent_link(self):
+        calls = []
+        message = self.message('data:image/png;base64,' + base64.b64encode(b'\x89PNG\r\n\x1a\nfixture').decode())
+        def request(method, path):
+            calls.append(path)
+            if 'parentID=ses_root' in path:
+                return [{'id': 'ses_worker', 'parentID': 'ses_root'}, {'id': 'ses_other', 'parentID': 'ses_foreign'}]
+            if '/api/session?' in path: return []
+            if path == '/api/session/ses_worker/message/msg_test': return message
+            if path.startswith('/api/session/ses_worker/message?'): return [message]
+            return []
+        steps = task_steps(request, 'ses_root')
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(steps[0]['sessionID'], 'ses_worker')
+        self.assertEqual(task_image(request, 'ses_root', 'ses_worker', 'msg_test', 'call_test', 0)[0], 'image/png')
+        calls.clear()
+        with self.assertRaises(ValueError): task_image(request, 'ses_root', 'ses_other', 'msg_test', 'call_test', 0)
+        self.assertFalse(any('/ses_other/' in path for path in calls))

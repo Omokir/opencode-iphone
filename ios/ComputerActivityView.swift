@@ -5,12 +5,13 @@ struct ComputerActivity: Decodable {
     struct Step: Decodable, Identifiable {
         struct Picture: Decodable { let index: Int; let mime: String }
         let messageID: String
+        let sessionID: String?
         let toolID: String
         let name: String
         let state: String
         let time: Double
         let images: [Picture]
-        var id: String { messageID + ":" + toolID }
+        var id: String { (sessionID ?? "") + ":" + messageID + ":" + toolID }
     }
     let steps: [Step]
 }
@@ -63,7 +64,7 @@ struct ComputerActivityView: View {
         loading = true; defer { loading = false }
         let connection = api.connectionID
         do {
-            let path = "/phone/kzl/task/\(task.id)/computer/image?message=" + API.escape(step.messageID) + "&tool=" + API.escape(step.toolID) + "&index=\(index)"
+            let path = "/phone/kzl/task/\(task.id)/computer/image?message=" + API.escape(step.messageID) + "&tool=" + API.escape(step.toolID) + "&index=\(index)&session=" + API.escape(step.sessionID ?? task.child)
             let request = try api.makeRequest(path)
             let (data, response) = try await api.transport.data(for: request)
             guard connection == api.connectionID, !Task.isCancelled else { return }

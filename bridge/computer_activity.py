@@ -1,5 +1,42 @@
 """Read recorded computer-use steps. Never runs tools or fetches arbitrary URIs."""
 import base64
+import re
+import urllib.parse
+
+def task_sessions(request, root):
+    """Bounded discovery through Core parent links, never client-supplied ancestry."""
+    found = [root]
+    frontier = [root]
+    for _ in range(3):
+        next_level = []
+        for parent in frontier:
+            children = request('GET', '/api/session?' + urllib.parse.urlencode({'parentID': parent, 'limit': 20}))
+            for child in children if isinstance(children, list) else []:
+                sid = child.get('id')
+                if child.get('parentID') != parent or not isinstance(sid, str) or not re.fullmatch(r'ses[A-Za-z0-9_-]{1,160}', sid):
+                    continue
+                if sid not in found:
+                    found.append(sid); next_level.append(sid)
+                    if len(found) >= 20: return found
+        frontier = next_level
+        if not frontier: break
+    return found
+
+def task_steps(request, root):
+    sessions = task_sessions(request, root)
+    steps = []
+    for sid in sessions:
+        messages = request('GET', '/api/session/' + sid + '/message?limit=100&order=desc')
+        for step in project(messages):
+            step['sessionID'] = sid
+            steps.append(step)
+    return sorted(steps, key=lambda step: step['time'], reverse=True)[:60]
+
+def task_image(request, root, selected, message_id, tool_id, index):
+    if selected not in task_sessions(request, root):
+        raise ValueError('Image session does not belong to this task')
+    message = request('GET', '/api/session/' + selected + '/message/' + message_id)
+    return image_bytes(message, tool_id, index)
 
 NAMES = ('linux_computer_', 'linux_browser', 'computer_', 'browser_', 'desktop_')
 MIMES = {'image/png', 'image/jpeg', 'image/webp'}
