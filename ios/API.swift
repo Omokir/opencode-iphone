@@ -73,6 +73,11 @@ final class API: ObservableObject {
                 try ComputerVault.save(migrated); computers = migrated
             }
         } catch { connectionIssue = "Lista de computadores indisponível; conexão atual preservada." }
+        #if SNAPSHOT
+        // Simulator fixtures must exercise the same connected-state guards.
+        server = "https://fixture.ts.net:8443"
+        connected = true
+        #endif
     }
 
     static func validate(_ value: String) throws -> URL {
