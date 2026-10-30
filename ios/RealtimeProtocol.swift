@@ -5,6 +5,7 @@ struct VoiceToolCall: Identifiable, Equatable {
     let name: String
     let task: String?
     var jobID: String? = nil
+    var query: String? = nil
 }
 
 enum RealtimeProtocol {
@@ -22,6 +23,9 @@ enum RealtimeProtocol {
                   let name = item["name"] as? String, let raw = item["arguments"] as? String, raw.utf8.count <= 8192,
                   let arguments = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any] else { return nil }
             if ["opencode_status", "opencode_capabilities"].contains(name), arguments.isEmpty { return VoiceToolCall(id: id, name: name, task: nil) }
+            if name == "opencode_capabilities", Set(arguments.keys) == ["query"], let query = arguments["query"] as? String, query.count <= 200 {
+                return VoiceToolCall(id: id, name: name, task: nil, query: query)
+            }
             if ["opencode_cancel", "opencode_update"].contains(name),
                let job = arguments["jobID"] as? String, job.hasPrefix("job_"), job.count <= 164,
                job.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }) {
@@ -50,8 +54,8 @@ enum RealtimeProtocol {
              "parameters": ["type": "object", "properties": ["task": ["type": "string", "maxLength": 4000]], "required": ["task"], "additionalProperties": false]],
             ["type": "function", "name": "opencode_status", "description": "Consultar tarefas do Agente KzL, seus estados e resultados identificados, sem executar ações.",
              "parameters": ["type": "object", "properties": [:], "additionalProperties": false]],
-            ["type": "function", "name": "opencode_capabilities", "description": "Consultar MCPs conectados, agentes e pasta do Agente KzL. Não é catálogo completo nem garantia de permissão.",
-             "parameters": ["type": "object", "properties": [:], "additionalProperties": false]],
+            ["type": "function", "name": "opencode_capabilities", "description": "Pesquisar registro real de ferramentas por nome/descrição, por exemplo linux_computer ou browser. Lista limitada; consulte matching/complete. Não garante permissão nem execução.",
+             "parameters": ["type": "object", "properties": ["query": ["type": "string", "maxLength": 200]], "additionalProperties": false]],
             ["type": "function", "name": "opencode_update", "description": "Encaminhar correção explícita para tarefa ativa identificada; não garante desfazer ações já feitas.",
              "parameters": ["type": "object", "properties": ["jobID": ["type": "string"], "task": ["type": "string", "maxLength": 4000]], "required": ["jobID", "task"], "additionalProperties": false]],
             ["type": "function", "name": "opencode_cancel", "description": "Solicitar interrupção de tarefa somente quando usuário pedir explicitamente. Não desfaz alterações.",

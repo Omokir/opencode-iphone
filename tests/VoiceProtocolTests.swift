@@ -18,6 +18,8 @@ import Foundation
         precondition(session["type"] as? String == "realtime")
         precondition((session["tools"] as? [[String: Any]])?.count == 5)
         precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_capabilities", arguments: "{}")).count == 1)
+        precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_capabilities", arguments: #"{"query":"linux_computer"}"#)).first?.query == "linux_computer")
+        precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_capabilities", arguments: #"{"query":"linux_computer","execute":true}"#)).isEmpty)
         precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_cancel", arguments: #"{"jobID":"job_abc"}"#)).first?.jobID == "job_abc")
         precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_update", arguments: #"{"jobID":"job_abc","task":"Read only"}"#)).first?.task == "Read only")
         precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_cancel", arguments: #"{"jobID":"job_../../secret"}"#)).isEmpty)

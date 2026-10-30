@@ -311,7 +311,7 @@ import Combine
                 let task: KzLTask = try await api.request("/phone/kzl/task/\(id)/cancel", method: "POST", body: [:])
                 result = task.payload
             case "opencode_capabilities":
-                let value: JSONValue = try await api.request("/phone/kzl/capabilities")
+                let value: JSONValue = try await api.request("/phone/kzl/capabilities?q=" + API.escape(call.query ?? ""))
                 result = ["untrusted_capabilities": value.object]
             default:
                 let list: KzLTaskList = try await api.request("/phone/kzl/tasks")

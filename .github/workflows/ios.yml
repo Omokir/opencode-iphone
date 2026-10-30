@@ -20,6 +20,8 @@ jobs:
           fetch-depth: 3
       - name: Gateway tests
         run: python3 -m unittest discover -s bridge -v
+      - name: Runtime catalog projection tests
+        run: node --test tests/catalog.test.mjs
       - name: Native model regression tests
         run: |
           mkdir -p build

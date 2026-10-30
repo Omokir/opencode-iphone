@@ -98,6 +98,18 @@ class KzLTests(unittest.TestCase):
         restarted.tick()
         self.assertEqual(len([w for w in self.core.writes if w[1].endswith('/prompt')]), 1)
 
+    def test_desktop_coordinator_preserves_rules_without_consuming_worker_depth(self):
+        origin = self.core.sessions[self.parent['id']]
+        origin['agent'] = 'computer-use'
+        origin['permissions'] = [{'action': 'shell', 'resource': 'sudo *', 'effect': 'deny'}]
+        task = self.submit()
+        self.kzl.tick()
+        child = self.core.sessions[task['child']]
+        self.assertNotIn('parentID', child)
+        self.assertEqual(child['metadata']['kzlParent'], self.parent['id'])
+        self.assertEqual(child['permissions'], origin['permissions'])
+        self.assertEqual(child['agent'], 'computer-use')
+
     def test_uncertain_send_is_never_replayed(self):
         self.submit()
         self.core.fail_send = True

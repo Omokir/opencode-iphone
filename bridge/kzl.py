@@ -14,6 +14,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+from tool_catalog import catalog as tool_catalog
 
 
 class KzLError(Exception):
@@ -144,6 +145,13 @@ class KzL:
             jid, child, request = identifier('job_'), identifier('ses_'), identifier('msg_')
             spec = {'id': child, 'parentID': parent, 'title': text.strip()[:100],
                     'location': origin['location'], 'metadata': {'kzlTask': jid}}
+            # A coordinator needs one subagent level for its desktop worker.
+            # Structural task nesting must not consume that execution level.
+            # Only root KzL sessions qualify; copy session rules, never allow-all.
+            if origin.get('agent') == 'computer-use' and not origin.get('parentID'):
+                spec.pop('parentID')
+                spec['metadata']['kzlParent'] = parent
+                spec['permissions'] = origin.get('permissions', [])
             for key in ('agent', 'model'):
                 if origin.get(key):
                     spec[key] = origin[key]
@@ -362,17 +370,18 @@ class KzL:
             rows = list(db.execute('SELECT id,role,text,created FROM turns WHERE parent=? ORDER BY created DESC LIMIT 100', (self.session_id(),)))
         return {'turns': [dict(row) for row in reversed(rows)]}
 
-    def capabilities(self):
+    def capabilities(self, search=''):
         parent = self.request('GET', '/api/session/' + self.session_id())
         query = '?' + urllib.parse.urlencode({'location[directory]': parent['location']['directory']})
         servers = self.request('GET', '/api/mcp' + query)
         agents = self.request('GET', '/api/agent' + query)
+        registry = tool_catalog(self.root.parent, parent['location']['directory'], search)
         # Deliberate allowlist: never forward config, prompts, headers or raw errors.
         return {'servers': [{'name': str(s.get('name', ''))[:120],
                              'connected': s.get('status', {}).get('status') == 'connected'} for s in (servers or [])[:100]],
                 'agents': [{'id': a['id'], 'name': str(a.get('name', ''))[:120]} for a in (agents or [])[:40] if not a.get('hidden')],
                 'agent': parent.get('agent'), 'directory': parent['location']['directory'],
-                'toolCatalogComplete': False,
+                'toolCatalogComplete': registry['complete'], 'catalog': registry,
                 'note': 'MCP conectado não prova disponibilidade/permissão de ferramenta específica. OpenCode descobre ferramentas ao executar; não invente capacidades.'}
 
     def start(self):
