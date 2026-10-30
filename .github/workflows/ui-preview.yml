@@ -1,0 +1,22 @@
+name: iPhone UI preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: macos-15
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and capture native simulator screens
+        env:
+          SNAPSHOTS_ONLY: '1'
+        run: bash scripts/simulator-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iPhone-UI-preview
+          path: build/iphone-*.png
+          if-no-files-found: warn
+          retention-days: 7

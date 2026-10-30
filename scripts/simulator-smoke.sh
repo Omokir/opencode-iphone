@@ -5,7 +5,16 @@ APP=build/simulator/OpenCodePocket.app
 mkdir -p "$APP"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
+if [ ! -d build/WebRTC.xcframework ]; then
+  curl --fail --location --retry 2 'https://github.com/stasel/WebRTC/releases/download/156.0.0/WebRTC-M156.xcframework.zip' -o build/WebRTC.zip
+  echo '43c2a6f7a650185bbc911d7605a979589671886e8fc0ac283f54fdf3f511dc46  build/WebRTC.zip' | shasum -a 256 -c -
+  unzip -q build/WebRTC.zip -d build
+fi
+RTC=$(python3 -c 'import plistlib; p="build/WebRTC.xcframework"; v=plistlib.load(open(p+"/Info.plist","rb")); print(p+"/"+next(x["LibraryIdentifier"] for x in v["AvailableLibraries"] if x.get("SupportedPlatformVariant")=="simulator" and "'"$ARCH"'" in x["SupportedArchitectures"]))')
+mkdir -p "$APP/Frameworks"
+cp -R "$RTC/WebRTC.framework" "$APP/Frameworks/"
 xcrun --sdk iphonesimulator swiftc -swift-version 5 -parse-as-library -D SNAPSHOT \
+  -F "$RTC" -framework WebRTC -framework CallKit -Xlinker -rpath -Xlinker @executable_path/Frameworks \
   -target "$ARCH-apple-ios17.0-simulator" -sdk "$SDK" \
   -framework SwiftUI -framework UIKit -framework Security -framework CryptoKit -framework QuickLook -framework ImageIO -framework LocalAuthentication -framework UserNotifications -framework AVFoundation -framework AVFAudio -framework AVKit \
   ios/*.swift \
@@ -23,6 +32,8 @@ for SCREEN in onboarding chat options models control sessions question files inb
   xcrun simctl io "$DEVICE" screenshot "build/iphone-$SCREEN.png"
   xcrun simctl terminate "$DEVICE" com.omokir.opencodepocket
 done
+
+if [ "${SNAPSHOTS_ONLY:-0}" = "1" ]; then exit 0; fi
 
 # Interaction test, not a fixture screenshot: open the actual system picker.
 npm install --prefix build/ui-tools --no-audit --no-fund mobilecli@1.0.21
