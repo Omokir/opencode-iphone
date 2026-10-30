@@ -50,7 +50,7 @@ struct KzLCallScreen: View {
                         Button { call.end(); call.presented = false; dismiss() } label: {
                             VStack(spacing: 10) {
                                 Image(systemName: "phone.down.fill").font(.system(size: 24)).foregroundStyle(.white).frame(width: 64, height: 64).background(PocketDesign.kzL, in: Circle())
-                                Text("Encerrar").font(.caption).foregroundStyle(.secondary)
+                                Text("Encerrar").font(.caption).foregroundStyle(Color.white.opacity(0.65))
                             }
                         }.accessibilityLabel("Encerrar ligação")
                         Button { voice.setMuted(!voice.muted) } label: {

@@ -1,6 +1,12 @@
 name: iPhone UI preview
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Preview suite
+        type: choice
+        options: [full, call]
+        default: full
 permissions:
   contents: read
 jobs:
@@ -12,8 +18,8 @@ jobs:
       - name: Build and capture native simulator screens
         env:
           SNAPSHOTS_ONLY: '1'
-          UI_INTERACTIONS: '1'
-          UI_SCREEN_LIST: 'conversation sidebar call call-active live chat'
+          UI_INTERACTIONS: ${{ inputs.suite == 'call' && '0' || '1' }}
+          UI_SCREEN_LIST: ${{ inputs.suite == 'call' && 'call-active' || 'conversation sidebar call call-active live chat' }}
         run: bash scripts/simulator-smoke.sh
       - uses: actions/upload-artifact@v4
         if: always()
