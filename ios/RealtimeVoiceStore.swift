@@ -282,8 +282,18 @@ import Combine
                 return
             }
             if call.name == "opencode_capabilities" {
-                let value: JSONValue = try await api.request("/phone/kzl/capabilities?q=" + API.escape(call.query ?? ""))
+                let requestedSession = liveSession
+                let suffix = requestedSession.map { "&sessionID=" + API.escape($0.id) } ?? ""
+                let value: JSONValue = try await api.request("/phone/kzl/capabilities?q=" + API.escape(call.query ?? "") + suffix)
                 guard generation == token, active, api.server == boundServer, api.connectionID == boundConnectionID else { return }
+                if let requestedSession {
+                    let scope = value.object as? [String: Any]
+                    guard scope?["sessionID"] as? String == requestedSession.id,
+                          scope?["directory"] as? String == requestedSession.location.directory else {
+                        try await toolResult(call.id, result: ["status": "unsupported_scope", "message": "Catálogo deste projeto não confirmado pelo gateway. Não afirme falta de acesso: encaminhe a consulta por opencode_submit na conversa atual, respeitando permissões."], token: token)
+                        return
+                    }
+                }
                 try await toolResult(call.id, result: ["untrusted": true, "untrusted_capabilities": value.object, "note": "Catálogo declarado, não prova de acesso nem autorização. Para consultar estado real, encaminhe tarefa ao agente local."], token: token)
                 return
             }

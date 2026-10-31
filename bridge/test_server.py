@@ -68,6 +68,21 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(self.request('/phone/kzl/task/job_x/../../shell', 'test-token', {})[0], 400)
             upstream.assert_not_called()
 
+    def test_live_capabilities_wire_is_authenticated_read_only_and_project_bound(self):
+        from test_kzl import Core
+        core = Core()
+        core.sessions['ses_live'] = {'id': 'ses_live', 'agent': 'plan', 'location': {'directory': '/fixture/live'}}
+        route = '/phone/kzl/capabilities?sessionID=ses_live&q=ssh'
+        self.assertEqual(self.request(route)[0], 401)
+        with patch.object(server, 'upstream', side_effect=core):
+            status, value = self.request(route, 'test-token')
+            self.assertEqual(status, 200)
+            self.assertEqual(value['sessionID'], 'ses_live')
+            self.assertEqual(value['directory'], '/fixture/live')
+            self.assertEqual(core.writes, [])
+            self.assertEqual(self.request('/phone/kzl/capabilities?sessionID=ses_bad%2Fsecret', 'test-token')[0], 400)
+            self.assertNotIn('never-return', json.dumps(value))
+
     def test_kzl_wire_identity_queue_and_revision_hint(self):
         from test_kzl import Core
         core = Core()

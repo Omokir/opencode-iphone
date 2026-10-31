@@ -463,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, coordinator.memory())
                 if path == '/phone/kzl/capabilities':
                     query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-                    return self.reply(200, coordinator.capabilities(query.get('q', [''])[0]))
+                    return self.reply(200, coordinator.capabilities(query.get('q', [''])[0], query.get('sessionID', [None])[0]))
                 if path == '/phone/kzl/tasks':
                     return self.reply(200, {'tasks': coordinator.jobs()})
                 payload = json.loads(body or b'{}')
