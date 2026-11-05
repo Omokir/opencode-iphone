@@ -1,5 +1,38 @@
 # KzL Agent Linux 0.7.0 · Darktech
 
+## Conversation redesign
+
+The approved black/red visual concept is adapted to native GTK, retaining the
+original avatar, callbacks, backend contracts and native dialogs. A compact
+sidebar gives New Conversation the primary action, adds conversation timestamps,
+and keeps files/transfers/activity/computer controls at the bottom. The chat uses
+one identity header, an overflow action menu, message avatars/times and a wider
+outlined composer with attachment, paid-voice and send controls. Model/mode moves
+below the composer. Project creation/favorites remain in the chat action menu.
+No operating-system panel or wallpaper from the concept is recreated.
+
+Ctrl+K focuses conversation-name search. In portrait, history replaces the chat
+rather than squeezing both into 414px; the History button returns to the current
+chat and preserves its draft. Ctrl+F restores the chat before showing loaded-message
+search. Error notices remain visible even while history is open. Light/system
+choices, modal shortcut guards, provider confirmations and draft journals remain.
+
+Validation for this change: `test_redesign`, `test_richtext`,
+`test_terminal_policy` and `test_install` passed (30 tests); Python compilation,
+native GTK CSS parsing and `git diff --check` passed. This change was authored in
+a container that rejects local display and D-Bus sockets, including private Xvfb.
+Consequently the final native visual/414px interaction smoke has **not** run there.
+`test_backend` additionally cannot import its existing `preview/test_server.py`
+fixture, which is absent from this checkout. Connected and voice tests were not run.
+
+Before installing on the target Linux, run the existing native smoke checks plus
+`smoke_redesign.py` on a private display using demo data. The new smoke accepts a
+private writable `POCKET_SMOKE_DIR`; optional `POCKET_SMOKE_CAPTURE=1` saves
+synthetic desktop and portrait screenshots with ImageMagick. It covers the action
+menu, avatar/time rendering, composer geometry, history/search return, visible
+errors, themes, modal guards and draft preservation, without real APIs or media.
+
+
 Native darktech identity follows the conversation-first web prototype: near-black
 canvas, graphite surfaces, red primary action/selection, restrained technical
 monospace accents and the unchanged original avatar. First launch of this design
@@ -203,7 +236,7 @@ Alternatively:
 
 The phone button in the title bar toggles a **414 px usable portrait viewport**.
 Desktop mode has a permanent history sidebar and a clamped reading column.
-Portrait hides that sidebar; the history button reveals it. Native window
+Portrait hides that sidebar; the history button reveals it in place of the chat. Native window
 decorations, typography, file chooser and keyboard are Linux controls, not
 SwiftUI or an assertion of pixel-identical iOS rendering.
 

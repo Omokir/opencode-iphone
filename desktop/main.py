@@ -26,69 +26,102 @@ from terminal_policy import directory_path
 ROOT = Path(__file__).resolve().parent
 STYLE = '''
 window { background: @window_bg_color; }
-.brand { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+.brand { font-size: 21px; font-weight: 750; letter-spacing: -.5px; }
 .muted { color: alpha(@window_fg_color, .68); }
-.sidebar { background: alpha(@window_fg_color, .025); border-right: 1px solid alpha(@window_fg_color,.08); }
-.sidebar-row { padding: 12px 10px; border-radius: 14px; }
-.sidebar-row:selected { background: alpha(@window_fg_color,.075); color: @window_fg_color; }
-.sidebar-section { font-size: 11px; font-weight: 700; letter-spacing: 1px; }
-.chat-title { font-size: 16px; font-weight: 600; }
-.user-bubble { background: alpha(@window_fg_color,.055); padding: 12px 16px; border-radius: 24px 24px 6px 24px; }
+.sidebar { background: alpha(@window_fg_color, .025); }
+.sidebar-brand { padding: 8px 4px 12px; }
+.sidebar-subtitle, .session-directory { font-size: 12px; }
+.sidebar-actions button { min-height: 42px; border-radius: 12px; }
+.sidebar-actions .new-conversation { background: #a71e36; color: white; border: 1px solid #dd4057; }
+.sidebar-actions .new-conversation:hover { background: #be2942; }
+.sidebar-search { min-height: 38px; border-radius: 12px; }
+.sidebar-section { font-size: 12px; font-weight: 600; }
+.sidebar-row { padding: 10px 12px; border-radius: 10px; margin: 1px 8px; }
+.sidebar-row:selected { background: alpha(@window_fg_color, .075); color: @window_fg_color; }
+.session-title { font-size: 13px; font-weight: 550; }
+.session-time, .message-time { font-size: 11px; color: alpha(@window_fg_color, .6); }
+.sidebar-footer { padding: 12px 10px 0; border-top: 1px solid alpha(@window_fg_color, .1); }
+.sidebar-footer button { min-width: 36px; min-height: 38px; border-radius: 10px; }
+.sidebar-more { min-height: 34px; border-radius: 10px; margin: 8px 16px 16px; }
+.chat-panel { border: 1px solid alpha(@window_fg_color, .1); border-radius: 20px; }
+.chat-title { font-size: 18px; font-weight: 650; }
+.chat-subtitle { font-size: 12px; color: alpha(@window_fg_color, .68); }
+.toolbar-flat { padding: 18px 20px; border-bottom: 1px solid alpha(@window_fg_color, .08); }
+.toolbar-flat button, .toolbar-flat menubutton > button { min-width: 32px; min-height: 34px; border-radius: 10px; }
+.chat-actions { padding: 6px; }
+.chat-actions button { min-height: 36px; border-radius: 9px; }
+.agent-identity { padding: 5px; border: 1px solid alpha(@window_fg_color, .12); border-radius: 12px; background: alpha(@window_fg_color, .035); }
+.message-avatar { min-width: 28px; min-height: 28px; }
+.user-avatar { border-radius: 50%; padding: 6px; background: alpha(@window_fg_color, .06); }
+.user-bubble { background: alpha(@window_fg_color, .055); border: 1px solid alpha(@window_fg_color, .1); padding: 12px 16px; border-radius: 16px; }
 .message-text { font-size: 16px; line-height: 1.5; }
-.code-block { font-family: monospace; font-size: 13px; padding: 12px; border-radius: 12px; background: alpha(@window_fg_color,.045); }
-.composer { border-radius: 28px; background: alpha(@window_fg_color,.035); border: 1px solid alpha(@window_fg_color,.16); padding: 6px; box-shadow: 0 3px 12px alpha(black,.04); }
-.composer textview, .composer textview text { background: transparent; font-size: 16px; }
-.composer button { border-radius: 50%; min-height: 44px; min-width: 44px; background: transparent; box-shadow:none; border:0; padding:0; }
-.composer .send { background: @window_fg_color; color: @window_bg_color; }
-.send:disabled { opacity:.3; }
-.error-banner { background: alpha(#c41a29,.09); padding: 10px 16px; border-radius: 12px; }
-.permission { background: alpha(#c58a17,.12); padding: 10px; border-radius: 12px; }
+.code-block { font-family: monospace; font-size: 13px; padding: 12px; border-radius: 10px; background: alpha(@window_fg_color, .045); }
+.tool-disclosure { padding: 10px 12px; border-radius: 10px; background: alpha(@window_fg_color, .045); }
+.tool-disclosure > title { font-size: 12px; }
+.composer { border-radius: 18px; background: alpha(@window_fg_color, .035); border: 1px solid alpha(@window_fg_color, .2); padding: 8px; box-shadow: 0 4px 18px alpha(black, .05); }
+.composer:focus-within { border-color: #e54860; }
+.composer textview, .composer textview text { background: transparent; font-size: 15px; }
+.composer button { border-radius: 12px; min-height: 44px; min-width: 44px; background: transparent; box-shadow: none; border: 0; padding: 0; }
+.composer .voice-action { background: alpha(@window_fg_color, .06); }
+.composer .send { background: #c62743; color: white; }
+.composer .send:hover { background: #df3653; }
+.composer .send:disabled { background: alpha(@window_fg_color, .08); color: alpha(@window_fg_color, .4); opacity: 1; }
+.composer-footer { margin: 0 28px 16px; }
+.conversation-options button { min-height: 32px; border-radius: 18px; padding: 3px 12px; }
+.conversation-options .model-picker { font-size: 12px; font-weight: 500; }
+.conversation-status { font-size: 11px; color: alpha(@window_fg_color, .66); }
+.error-banner { background: alpha(#c41a29, .09); padding: 10px 16px; border-radius: 12px; }
+.permission { background: alpha(#c58a17, .12); padding: 10px; border-radius: 12px; }
 .kzl-name { color: #c41a29; font-weight: 650; }
-.empty-title { font-size: 28px; font-weight: 600; letter-spacing:-.8px; }
+.empty-title { font-size: 28px; font-weight: 600; letter-spacing: -.8px; }
 .pill { border-radius: 15px; padding: 3px 10px; }
-.toolbar-flat { padding: 8px 14px; border-bottom: 1px solid alpha(@window_fg_color,.05); }
-.conversation-options { margin: 4px 12px; }
-.conversation-options button { min-height: 36px; border-radius: 12px; }
-.conversation-options .model-picker { font-weight: 400; color: alpha(@window_fg_color,.7); }
-.agent-identity { padding: 10px; border: 1px solid alpha(@window_fg_color,.08); border-radius: 18px; background: @window_bg_color; }
-.conversation-status { font-size: 12px; color: alpha(@window_fg_color,.68); }
-button:focus-visible, entry:focus-visible, textview:focus-visible { outline: 2px solid @window_fg_color; outline-offset: 2px; }
-.call-start { background:@window_fg_color; color:@window_bg_color; min-height:38px; border-radius:16px; }
-.kzl-call-start { background:#c41a29; color:white; }
-.md-h1 { font-size:26px; font-weight:700; letter-spacing:-.6px; }
-.md-h2 { font-size:22px; font-weight:650; letter-spacing:-.3px; }
-.md-h3 { font-size:19px; font-weight:600; }
-.md-h4, .md-h5, .md-h6 { font-size:16px; font-weight:600; }
-.md-quote { border-left:3px solid alpha(@window_fg_color,.22); padding:4px 0 4px 14px; color:alpha(@window_fg_color,.8); }
-.md-table-cell { padding:8px 12px; border-bottom:1px solid alpha(@window_fg_color,.1); font-size:14px; }
-.md-table-head { background:alpha(@window_fg_color,.07); font-weight:600; }
-.md-table-alt { background:alpha(@window_fg_color,.025); }
-.md-table-scroll { border:1px solid alpha(@window_fg_color,.12); border-radius:12px; }
-.md-code-view, .md-code-view text { background:transparent; font-family:monospace; font-size:13px; }
-/* Darktech: one red signal, quiet graphite surfaces, native controls retained. */
-window.darktech { background:#09090c; color:#f2f2f5; }
-.darktech headerbar { background:#0d0d12; color:#f2f2f5; border-bottom:1px solid #2a2a33; box-shadow:none; }
-.darktech .sidebar { background:#0f0f15; border-right:1px solid #2a2a33; }
-.darktech .agent-identity { background:#15151b; border:1px solid #36303a; border-radius:14px; }
-.darktech .kzl-name { color:#ff6370; }
-.darktech .sidebar-row { border-radius:10px; }
-.darktech .sidebar-row:selected { background:#321820; color:#fff; box-shadow:inset 3px 0 #e53945; }
-.darktech .toolbar-flat { border-bottom:1px solid #22222c; }
-.darktech .conversation-options .model-picker, .darktech .muted, .darktech .dim-label { color:#b3b3c0; opacity:1; }
-.darktech .conversation-options { margin:6px 12px; }
-.darktech .user-bubble { background:#1b1820; border:1px solid #36232d; border-radius:18px 18px 5px 18px; }
-.darktech .composer { background:#15151b; border:1px solid #44303a; border-radius:20px; box-shadow:0 4px 20px alpha(black,.25); }
-.darktech .composer .send { background:#e53945; color:#fff; }
-.darktech .composer .send:hover { background:#f24c58; }
-.darktech .composer .send:disabled { background:#34303a; color:#b3b3c0; opacity:1; }
-.darktech .code-block { background:#121219; border:1px solid #2a2a33; border-radius:10px; }
-.darktech .code-block, .darktech .sidebar-section, .darktech .conversation-status { font-family:monospace; }
-.darktech .error-banner { background:#321820; color:#ffb8be; border:1px solid #71313d; }
-.darktech .permission { background:#302515; color:#f6d499; border:1px solid #64502e; }
-.darktech .md-table-head { background:#23232e; }
-.darktech .md-table-alt { background:#121219; }
-.darktech .md-table-scroll { border-color:#363643; }
-.darktech button:focus-visible, .darktech entry:focus-visible, .darktech textview:focus-visible { outline:2px solid #ff6370; outline-offset:2px; }
+button:focus-visible, entry:focus-visible, textview:focus-visible { outline: 2px solid #cc304a; outline-offset: 2px; }
+.call-start { background: @window_fg_color; color: @window_bg_color; min-height: 38px; border-radius: 16px; }
+.kzl-call-start { background: #c41a29; color: white; }
+.md-h1 { font-size: 26px; font-weight: 700; letter-spacing: -.6px; }
+.md-h2 { font-size: 22px; font-weight: 650; letter-spacing: -.3px; }
+.md-h3 { font-size: 19px; font-weight: 600; }
+.md-h4, .md-h5, .md-h6 { font-size: 16px; font-weight: 600; }
+.md-quote { border-left: 3px solid alpha(@window_fg_color, .22); padding: 4px 0 4px 14px; color: alpha(@window_fg_color, .8); }
+.md-table-cell { padding: 8px 12px; border-bottom: 1px solid alpha(@window_fg_color, .1); font-size: 14px; }
+.md-table-head { background: alpha(@window_fg_color, .07); font-weight: 600; }
+.md-table-alt { background: alpha(@window_fg_color, .025); }
+.md-table-scroll { border: 1px solid alpha(@window_fg_color, .12); border-radius: 12px; }
+.md-code-view, .md-code-view text { background: transparent; font-family: monospace; font-size: 13px; }
+/* Native graphite/red redesign. Light/system choices and focus stay available. */
+window.darktech { background: #0e0f11; color: #f2f2f5; }
+.darktech headerbar { background: #101114; color: #f2f2f5; box-shadow: none; border-bottom: 1px solid #24252b; }
+.darktech .sidebar { background: #101113; }
+.darktech .sidebar-actions button, .darktech .sidebar-more { background: #1c1d21; border: 1px solid #34353d; }
+.darktech .sidebar-actions .new-conversation { background: linear-gradient(110deg, #64152a, #30151e); border-color: #cb334f; }
+.darktech .sidebar-actions .new-conversation:hover { background: #732039; }
+.darktech .sidebar-search { background: #1b1c20; border: 1px solid #34353b; }
+.darktech .sidebar-row:selected { background: linear-gradient(110deg, #431924, #2b1a21); color: white; box-shadow: inset 2px 0 #e53c5b; }
+.darktech .sidebar-row:selected image { color: #f34b69; }
+.darktech .chat-panel { background: #0f1012; border-color: #26272d; }
+.darktech .toolbar-flat { border-bottom-color: #26272d; background: linear-gradient(140deg, #101113 60%, #241319); border-radius: 20px 20px 0 0; }
+.darktech .toolbar-flat button, .darktech .toolbar-flat menubutton > button { background: #17181b; border: 1px solid #2d2e34; }
+.darktech .agent-identity { background: #21171e; border-color: #3d2833; }
+.darktech .kzl-name { color: #ff637b; }
+.darktech .muted, .darktech .dim-label, .darktech .chat-subtitle { color: #b5b5c0; opacity: 1; }
+.darktech .user-bubble { background: #242027; border-color: #3c303d; }
+.darktech .tool-disclosure { background: #1a1b1f; }
+.darktech .composer { background: linear-gradient(115deg, #242027, #191a1e); border-color: #a22c45; box-shadow: 0 6px 20px alpha(black, .2); }
+.darktech .composer:focus-within { border-color: #ef4664; }
+.darktech .composer .send { background: linear-gradient(135deg, #e43d5a, #ac1d37); }
+.darktech .composer .send:hover { background: #e84360; }
+.darktech .composer .send:disabled { background: #343039; color: #aaa4b0; }
+.darktech .conversation-options .model-picker { background: #1a1b1f; border: 1px solid #34353c; color: #e4e4e9; }
+.darktech .code-block { background: #15161b; border: 1px solid #2a2b33; }
+.darktech .error-banner { background: #321820; color: #ffb8be; border: 1px solid #71313d; }
+.darktech .permission { background: #302515; color: #f6d499; border: 1px solid #64502e; }
+.darktech .md-table-head { background: #23232e; }
+.darktech .md-table-alt { background: #121219; }
+.darktech .md-table-scroll { border-color: #363643; }
+.darktech button:focus-visible, .darktech entry:focus-visible, .darktech textview:focus-visible { outline-color: #ff637b; }
+.compact .toolbar-flat { padding: 12px; }
+.compact .chat-panel { border-radius: 0; border-width: 0; }
+.compact .composer-footer { margin: 0 16px 12px; }
 '''
 
 
@@ -139,6 +172,20 @@ def inline(text):
     escaped = html.escape(text)
     escaped = re.sub(r'`([^`\n]+)`', r'<tt>\1</tt>', escaped)
     return re.sub(r'\*\*([^*\n]+)\*\*', r'<b>\1</b>', escaped)
+
+
+def display_time(value, relative=False):
+    """Format gateway epoch milliseconds (or legacy seconds); missing stays blank."""
+    try:
+        stamp = float(value)
+        if stamp <= 0:
+            return ''
+        moment = datetime.fromtimestamp(stamp / 1000 if stamp > 100_000_000_000 else stamp)
+        if relative and moment.date() != datetime.now().date():
+            return 'Ontem' if moment.date() == (datetime.now() - timedelta(days=1)).date() else moment.strftime('%d/%m')
+        return moment.strftime('%H:%M')
+    except (ValueError, TypeError, OverflowError, OSError):
+        return ''
 
 
 class Pocket(Gtk.Application):
@@ -196,13 +243,13 @@ class Pocket(Gtk.Application):
         css = Gtk.CssProvider(); css.load_from_string(STYLE)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.window = Gtk.ApplicationWindow(application=self, title='KzL Agent')
-        self.window.set_default_size(1180, 820)
+        self.window.set_default_size(1280, 860)
         self.window.connect('close-request', self.close)
         shortcuts = Gtk.EventControllerKey(); shortcuts.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         shortcuts.connect('key-pressed', self.window_shortcuts); self.window.add_controller(shortcuts)
         self.root = box(True)
         self.header = Gtk.HeaderBar()
-        self.header.set_title_widget(label('KzL Agent', 'brand'))
+        self.header.set_title_widget(label('KzL Agent', 'sidebar-section'))
         self.history_button = button('sidebar-show-symbolic', callback=self.toggle_sidebar, tooltip='Histórico')
         self.header.pack_start(self.history_button)
         self.portrait = Gtk.ToggleButton(icon_name='phone-symbolic', tooltip_text='Modo retrato · 414 px')
@@ -211,10 +258,10 @@ class Pocket(Gtk.Application):
         self.header.pack_end(button('emblem-system-symbolic', callback=self.settings, tooltip='Ajustes'))
         self.window.set_titlebar(self.header)
         self.body = box()
-        self.sidebar = box(True, 8); self.sidebar.set_size_request(285, -1); self.sidebar.set_hexpand(False); self.sidebar.add_css_class('sidebar')
+        self.sidebar = box(True, 0); self.sidebar.set_size_request(300, -1); self.sidebar.set_hexpand(False); self.sidebar.add_css_class('sidebar')
         self.build_sidebar()
         self.body.append(self.sidebar)
-        self.content = box(True); self.content.set_hexpand(True)
+        self.content = box(True); self.content.set_hexpand(True); self.content.add_css_class('chat-panel'); margins(self.content, 8)
         self.build_chat(); self.body.append(self.content)
         self.root.append(self.body); self.body.set_vexpand(True)
         self.window.set_child(self.root)
@@ -229,72 +276,90 @@ class Pocket(Gtk.Application):
         self.load_sessions(initial=True); self.load_catalog()
         self.poll_timer = GLib.timeout_add(1200, self.poll)
 
+    def brand_image(self, size=32):
+        picture = Gtk.Image.new_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_scale(str(ROOT / 'KzL.png'), size, size, True))
+        picture.set_pixel_size(size); picture.set_size_request(size, size)
+        return picture
+
+    def action_button(self, icon, title, callback):
+        item = button(callback=callback, tooltip=title)
+        content = box(False, 12); content.append(Gtk.Image.new_from_icon_name(icon)); content.append(label(title))
+        item.set_child(content)
+        return item
+
     def build_sidebar(self):
-        brand = margins(box(False, 10), 16)
-        brand.add_css_class('agent-identity')
-        picture = Gtk.Image.new_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_scale(str(ROOT / 'KzL.png'), 40, 40, True)); picture.set_size_request(40, 40); picture.set_pixel_size(40)
-        brand.append(picture)
-        text = box(True, 3); text.append(label('Agente KzL', 'kzl-name')); subtitle = label('Seu agente no computador', 'dim-label'); subtitle.set_ellipsize(Pango.EllipsizeMode.END); text.append(subtitle); brand.append(text)
-        self.sidebar.append(brand)
-        self.sidebar.append(margins(button(text='Conversar com KzL', callback=self.open_kzl), 8))
-        actions = margins(box(False, 6), 10)
-        new = button(text='Nova conversa', callback=self.new_chat, tooltip='Nova conversa'); new.set_hexpand(True); actions.append(new)
-        actions.append(button('folder-new-symbolic', callback=self.choose_project, tooltip='Novo chat em um projeto'))
-        actions.append(button('starred-symbolic', callback=self.projects, tooltip='Projetos favoritos'))
-        self.sidebar.append(actions)
-        self.search = Gtk.SearchEntry(placeholder_text='Buscar conversas'); margins(self.search, 12)
+        brand = margins(box(False, 12), 18); brand.add_css_class('sidebar-brand')
+        brand.append(self.brand_image(40))
+        text = box(True, 3); text.append(label('KzL Agent', 'brand'))
+        subtitle = label('Seu agente no computador', 'sidebar-subtitle'); subtitle.add_css_class('muted'); subtitle.set_ellipsize(Pango.EllipsizeMode.END)
+        text.append(subtitle); brand.append(text); self.sidebar.append(brand)
+        actions = box(True, 8); actions.add_css_class('sidebar-actions'); actions.set_margin_start(18); actions.set_margin_end(18)
+        self.new_button = self.action_button('list-add-symbolic', 'Nova conversa', self.new_chat); self.new_button.add_css_class('new-conversation'); actions.append(self.new_button)
+        actions.append(self.action_button('chat-symbolic', 'Conversar com KzL', self.open_kzl)); self.sidebar.append(actions)
+        self.search = Gtk.SearchEntry(placeholder_text='Buscar conversas'); margins(self.search, 18); self.search.add_css_class('sidebar-search')
+        self.search.set_tooltip_text('Buscar conversas · Ctrl+K')
         self.search.connect('search-changed', lambda *_: self.load_sessions()); self.sidebar.append(self.search)
+        heading = box(False, 10); heading.set_margin_start(24); heading.set_margin_end(18); heading.set_margin_bottom(10)
+        heading.append(Gtk.Image.new_from_icon_name('view-list-symbolic')); heading.append(label('Conversas recentes', 'sidebar-section')); self.sidebar.append(heading)
         scroll = Gtk.ScrolledWindow(); scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC); scroll.set_vexpand(True)
         self.session_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.session_list.add_css_class('navigation-sidebar'); self.session_list.connect('row-activated', self.row_activated)
         scroll.set_child(self.session_list); self.sidebar.append(scroll)
-        self.more = button(text='Mais conversas', callback=lambda: self.load_sessions(more=True)); self.more.set_visible(False); self.sidebar.append(self.more)
-        footer = margins(box(False, 3), 10)
+        self.more = button(text='Ver mais conversas', callback=lambda: self.load_sessions(more=True)); self.more.add_css_class('sidebar-more'); self.more.set_visible(False); self.sidebar.append(self.more)
+        footer = box(False, 3); footer.add_css_class('sidebar-footer')
         for icon, title, callback in [('folder-symbolic', 'Arquivos', self.files), ('go-up-symbolic', 'Transferências retomáveis', self.transfers), ('view-list-symbolic', 'Atividade e alterações', self.activity), ('computer-symbolic', 'Computador', self.computer)]:
             item = button(icon, callback=callback, tooltip=title); item.set_hexpand(True); footer.append(item)
         self.sidebar.append(footer)
-        self.sidebar.append(margins(label('Demonstração · sem API' if self.client.demo else 'Computador local · KzL Agent', 'dim-label'), 12))
+        detail = label('Demonstração · sem API' if self.client.demo else 'Computador local · KzL Agent', 'sidebar-subtitle'); detail.add_css_class('muted'); self.sidebar.append(margins(detail, 18))
 
     def build_chat(self):
-        toolbar = box(False, 8); toolbar.add_css_class('toolbar-flat')
-        self.title = label('Como posso ajudar?', 'chat-title'); self.title.set_ellipsize(Pango.EllipsizeMode.END); self.title.set_hexpand(True); toolbar.append(self.title)
+        toolbar = box(False, 10); toolbar.add_css_class('toolbar-flat')
+        identity = self.brand_image(32); identity.add_css_class('agent-identity'); toolbar.append(identity)
+        heading = box(True, 4); heading.set_hexpand(True)
+        self.title = label('Como posso ajudar?', 'chat-title'); self.title.set_ellipsize(Pango.EllipsizeMode.END); self.title.set_max_width_chars(30); heading.append(self.title)
+        self.subtitle = label('Seu agente no computador', 'chat-subtitle'); self.subtitle.set_ellipsize(Pango.EllipsizeMode.END); self.subtitle.set_max_width_chars(30); heading.append(self.subtitle); toolbar.append(heading)
         self.pin_button = button('non-starred-symbolic', callback=self.toggle_pin, tooltip='Fixar conversa'); toolbar.append(self.pin_button)
         toolbar.append(button('document-edit-symbolic', callback=self.rename, tooltip='Renomear conversa'))
-        toolbar.append(button('document-new-symbolic', callback=self.new_chat, tooltip='Nova conversa'))
-        self.content.append(toolbar)
-        options = box(False, 5); options.add_css_class('conversation-options')
-        self.options_button = button(text='Modelo · Build', callback=self.options); self.options_button.add_css_class('flat'); options.append(self.options_button)
-        self.options_button.add_css_class('model-picker')
-        self.options_button.set_hexpand(True)
-        self.options_button.get_child().set_ellipsize(Pango.EllipsizeMode.END); self.options_button.get_child().set_max_width_chars(18)
-        spacer = box(); spacer.set_hexpand(True); options.append(spacer)
-        options.append(button('system-run-symbolic', callback=self.resources, tooltip='Comandos, skills e fila'))
-        self.terminal_button = button('utilities-terminal-symbolic', callback=self.open_terminal, tooltip='Terminal local do projeto')
-        options.append(self.terminal_button)
-        self.voice_button = button('audio-input-microphone-symbolic', callback=self.open_voice, tooltip='Live desta conversa · API paga')
-        self.stop_button = button('media-playback-stop-symbolic', callback=self.interrupt, tooltip='Interromper execução'); options.append(self.stop_button)
-        self.content.append(options)
-        self.notice = label('', 'error-banner', True); margins(self.notice, 12); self.notice.set_visible(False); self.notice.set_selectable(True); self.content.append(self.notice)
+        self.chat_menu = Gtk.MenuButton(icon_name='view-more-symbolic', tooltip_text='Mais ações da conversa')
+        self.chat_menu.update_property([Gtk.AccessibleProperty.LABEL], ['Mais ações da conversa'])
+        self.chat_popover = Gtk.Popover(); menu = box(True, 4); menu.add_css_class('chat-actions')
+        def action(icon, title, callback):
+            item = self.action_button(icon, title, lambda: (self.chat_popover.popdown(), callback()))
+            menu.append(item); return item
+        action('document-new-symbolic', 'Nova conversa', self.new_chat)
+        action('folder-new-symbolic', 'Novo chat em um projeto', self.choose_project)
+        action('starred-symbolic', 'Projetos favoritos', self.projects)
+        menu.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        action('system-run-symbolic', 'Comandos, skills e fila', self.resources)
+        self.terminal_button = action('utilities-terminal-symbolic', 'Terminal local do projeto', self.open_terminal)
+        self.stop_button = action('media-playback-stop-symbolic', 'Interromper execução', self.interrupt)
+        self.chat_popover.set_child(menu); self.chat_menu.set_popover(self.chat_popover); toolbar.append(self.chat_menu); self.content.append(toolbar)
+        self.notice = label('', 'error-banner', True); margins(self.notice, 12); self.notice.set_visible(False); self.notice.set_selectable(True); self.root.append(self.notice)  # Visible even when portrait history replaces the chat.
         self.scroll = Gtk.ScrolledWindow(); self.scroll.set_vexpand(True); self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.message_box = box(True, 24); margins(self.message_box, 20)
-        clamp = Adw.Clamp(maximum_size=800, tightening_threshold=600); clamp.set_child(self.message_box)
+        self.message_box = box(True, 28); margins(self.message_box, 24)
+        clamp = Adw.Clamp(maximum_size=960, tightening_threshold=720); clamp.set_child(self.message_box)
         self.scroll.update_property([Gtk.AccessibleProperty.LABEL], ['Histórico da conversa'])
         self.scroll.set_child(clamp); self.content.append(self.scroll)
-        self.permission_box = margins(box(True, 5), 10); self.content.append(self.permission_box)
-        self.attach_box = margins(box(False, 5), 10); self.content.append(self.attach_box)
-        compose = margins(box(False, 5), 14); compose.add_css_class('composer'); compose.set_valign(Gtk.Align.END)
-        compose.append(button('list-add-symbolic', callback=self.attach, tooltip='Anexar imagens, PDF ou texto'))
-        self.draft = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR); self.draft.set_top_margin(10); self.draft.set_bottom_margin(10); self.draft.set_left_margin(4); self.draft.set_right_margin(4)
+        self.permission_box = margins(box(True, 5), 10); self.permission_box.set_visible(False); self.content.append(self.permission_box)
+        self.attach_box = margins(box(False, 5), 10); self.attach_box.set_visible(False); self.content.append(self.attach_box)
+        self.compose = margins(box(False, 8), 24); self.compose.add_css_class('composer'); self.compose.set_valign(Gtk.Align.END)
+        self.compose.set_margin_top(10); self.compose.set_margin_bottom(12)
+        self.compose.append(button('mail-attachment-symbolic', callback=self.attach, tooltip='Anexar imagens, PDF ou texto'))
+        self.draft = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR); self.draft.set_top_margin(12); self.draft.set_bottom_margin(10); self.draft.set_left_margin(4); self.draft.set_right_margin(4)
         self.draft.update_property([Gtk.AccessibleProperty.LABEL], ['Mensagem'])
         self.draft.get_buffer().connect('changed', self.draft_changed)
         keys = Gtk.EventControllerKey(); keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE); keys.connect('key-pressed', self.key_pressed); self.draft.add_controller(keys)
         draft_scroll = Gtk.ScrolledWindow(); draft_scroll.set_hexpand(True); draft_scroll.set_min_content_height(44); draft_scroll.set_max_content_height(150); draft_scroll.set_propagate_natural_height(True); draft_scroll.set_child(self.draft)
         overlay = Gtk.Overlay(); overlay.set_child(draft_scroll); overlay.set_hexpand(True)
-        self.placeholder = label('Mensagem', 'muted'); self.placeholder.set_margin_start(5); self.placeholder.set_valign(Gtk.Align.CENTER); self.placeholder.set_can_target(False); overlay.add_overlay(self.placeholder); compose.append(overlay)
-        self.voice_button.set_valign(Gtk.Align.END); compose.append(self.voice_button)
-        self.send_button = button('go-up-symbolic', callback=self.send, tooltip='Enviar mensagem · Enter'); self.send_button.add_css_class('send'); self.send_button.set_valign(Gtk.Align.END); compose.append(self.send_button)
-        clamp = Adw.Clamp(maximum_size=830); clamp.set_child(compose); self.content.append(clamp)
-        self.status = label('Demonstração sem API' if self.client.demo else 'Conectando ao computador…', 'dim-label'); self.status.set_halign(Gtk.Align.CENTER); self.status.set_margin_bottom(10); self.content.append(self.status)
+        self.placeholder = label('Mensagem para o Agente KzL…', 'muted'); self.placeholder.set_ellipsize(Pango.EllipsizeMode.END); self.placeholder.set_margin_start(5); self.placeholder.set_valign(Gtk.Align.CENTER); self.placeholder.set_can_target(False); overlay.add_overlay(self.placeholder); self.compose.append(overlay)
+        self.voice_button = button('audio-input-microphone-symbolic', callback=self.open_voice, tooltip='Live desta conversa · API paga'); self.voice_button.add_css_class('voice-action'); self.voice_button.set_valign(Gtk.Align.END); self.compose.append(self.voice_button)
+        self.send_button = button('document-send-symbolic', callback=self.send, tooltip='Enviar mensagem · Enter'); self.send_button.add_css_class('send'); self.send_button.set_valign(Gtk.Align.END); self.compose.append(self.send_button)
+        clamp = Adw.Clamp(maximum_size=960); clamp.set_child(self.compose); self.content.append(clamp)
+        self.composer_footer = box(False, 12); self.composer_footer.add_css_class('composer-footer'); self.composer_footer.add_css_class('conversation-options')
+        self.status = label('Demonstração sem API' if self.client.demo else 'Conectando ao computador…', 'conversation-status'); self.status.set_ellipsize(Pango.EllipsizeMode.END); self.status.set_hexpand(True); self.status.set_valign(Gtk.Align.CENTER); self.composer_footer.append(self.status)
+        self.options_button = button(text='Modelo · Build', callback=self.options, tooltip='Modelo e modo da conversa'); self.options_button.add_css_class('model-picker'); self.options_button.set_halign(Gtk.Align.END)
+        self.options_button.get_child().set_ellipsize(Pango.EllipsizeMode.END); self.options_button.get_child().set_max_width_chars(28); self.composer_footer.append(self.options_button)
+        clamp = Adw.Clamp(maximum_size=960); clamp.set_child(self.composer_footer); self.content.append(clamp)
 
     def error(self, text):
         if not text and self.save_error:
@@ -422,10 +487,14 @@ class Pocket(Gtk.Application):
             if (session.get('metadata') or {}).get('kzlAgent'):
                 continue
             row = Gtk.ListBoxRow(); row.add_css_class('sidebar-row'); row.session = session
-            content = box(True, 5)
-            title = label(('★ ' if session['id'] in pins else '') + (session.get('title') or 'Sem título')); title.set_ellipsize(Pango.EllipsizeMode.END); title.set_max_width_chars(25); content.append(title)
+            content = box(False, 12)
+            icon = Gtk.Image.new_from_icon_name('starred-symbolic' if session['id'] in pins else 'chat-symbolic'); content.append(icon)
+            details = box(True, 3); details.set_hexpand(True)
+            title = label(session.get('title') or 'Sem título', 'session-title'); title.set_ellipsize(Pango.EllipsizeMode.END); title.set_max_width_chars(24); details.append(title)
             directory = Path(session.get('location', {}).get('directory', '')).name
-            content.append(label(directory, 'dim-label')); row.set_child(content); self.session_list.append(row)
+            project = label(directory, 'session-directory'); project.add_css_class('muted'); project.set_ellipsize(Pango.EllipsizeMode.END); project.set_max_width_chars(24); details.append(project); content.append(details)
+            when = label(display_time((session.get('time') or {}).get('updated'), relative=True), 'session-time'); when.set_valign(Gtk.Align.START); content.append(when)
+            row.set_child(content); self.session_list.append(row)
             if self.session and session['id'] == self.session['id']:
                 self.session_list.select_row(row)
 
@@ -481,12 +550,15 @@ class Pocket(Gtk.Application):
         self.render_attachments(); self.update_composer(); self.render_sessions(); clear(self.permission_box)
         self.render_messages([]); self.error(''); self.restore_outgoing_notice(); self.refresh()
         if self.portrait.get_active():
-            self.sidebar.set_visible(False)
+            self.sidebar.set_visible(False); self.content.set_visible(True)
 
     def update_options_label(self):
         session = self.session or {}; model = session.get('model') or {}
         name = next((m.get('name') or m['id'] for m in self.catalog if m['id'] == model.get('id') and m['providerID'] == model.get('providerID')), model.get('id', 'Modelo padrão'))
-        self.options_button.set_label(name + ' · ' + (session.get('agent') or 'build').capitalize())
+        description = name + ' · ' + (session.get('agent') or 'build').capitalize()
+        self.options_button.set_label(description)
+        self.subtitle.set_text(description)
+        self.options_button.set_tooltip_text('Modelo e modo da conversa: ' + description)
 
     def restore_outgoing_notice(self):
         if self.save_error:
@@ -591,9 +663,14 @@ class Pocket(Gtk.Application):
             cached = self.message_widgets.get(message['id'])
             if cached and cached[0] == fingerprint:
                 wanted.append(cached[1]); new_widgets[message['id']] = cached; continue
-            content = box(True, 10)
-            if message.get('type') == 'user':
-                content.add_css_class('user-bubble'); content.set_margin_start(40)
+            row = box(False, 14); row.add_css_class('message-row')
+            content = box(True, 10); content.set_hexpand(True)
+            is_user = message.get('type') == 'user'
+            if is_user:
+                content.add_css_class('user-bubble'); row.set_margin_start(32)
+            else:
+                avatar = self.brand_image(28); avatar.add_css_class('agent-identity'); avatar.add_css_class('message-avatar'); avatar.set_valign(Gtk.Align.START); row.append(avatar)
+            row.append(content)
             text = message.get('text') or '\n'.join(p.get('text') or '' for p in message.get('content') or [] if p.get('type') == 'text')
             rendered = render_native(text, self.request_link, lambda value: self.window.get_clipboard().set(value)); content.append(rendered)
             for file in message.get('files') or []:
@@ -607,7 +684,7 @@ class Pocket(Gtk.Application):
                     content.append(card)
             tools = [p for p in message.get('content') or [] if p.get('type') == 'tool']
             if tools:
-                expander = Gtk.Expander(label=tool_progress(tools))
+                expander = Gtk.Expander(label=tool_progress(tools)); expander.add_css_class('tool-disclosure')
                 steps = box(True, 10)
                 for tool in tools[:100]:
                     state = tool_state_label(tool)
@@ -625,7 +702,12 @@ class Pocket(Gtk.Application):
                 expander.set_child(steps); content.append(expander)
             if message.get('error'):
                 content.append(label('Erro: ' + json.dumps(message['error'], ensure_ascii=False), 'error-banner', True))
-            wanted.append(content); new_widgets[message['id']] = (fingerprint, content)
+            timestamp = display_time((message.get('time') or {}).get('created'))
+            if timestamp:
+                when = label(timestamp, 'message-time'); when.set_halign(Gtk.Align.END); content.append(when)
+            if is_user:
+                avatar = Gtk.Image.new_from_icon_name('avatar-default-symbolic'); avatar.set_pixel_size(20); avatar.add_css_class('user-avatar'); avatar.set_valign(Gtk.Align.START); row.append(avatar)
+            wanted.append(row); new_widgets[message['id']] = (fingerprint, row)
         keep = set(wanted)
         for child in list(children(self.message_box)):
             if child not in keep:
@@ -692,6 +774,7 @@ class Pocket(Gtk.Application):
 
     def render_permissions(self, permissions, forms, stale=()):
         clear(self.permission_box)
+        self.permission_box.set_visible(bool(permissions or forms or stale))
         binding = self.action_binding()
         if stale:
             self.permission_box.append(label('Algumas revisões não puderam ser atualizadas. Controles antigos estão bloqueados até a próxima leitura confirmada.', 'error-banner', True))
@@ -838,7 +921,13 @@ class Pocket(Gtk.Application):
         if self.dialogs or self.save_choosers or self.upload_choosers or self.closing:
             return False
         if key in (Gdk.KEY_f, Gdk.KEY_F):
+            if self.portrait.get_active():
+                self.sidebar.set_visible(False); self.content.set_visible(True)
             self.search_conversation(); return True
+        if key in (Gdk.KEY_k, Gdk.KEY_K):
+            self.sidebar.set_visible(True)
+            self.content.set_visible(not self.portrait.get_active())
+            self.search.grab_focus(); return True
         if key in (Gdk.KEY_n, Gdk.KEY_N):
             self.new_chat(); return True
         return False
@@ -943,6 +1032,7 @@ class Pocket(Gtk.Application):
 
     def render_attachments(self):
         clear(self.attach_box)
+        self.attach_box.set_visible(bool(self.current_draft().get('files')))
         for index, file in enumerate(self.current_draft().get('files', [])):
             item = button(text=file['name'][:25] + ' ×', callback=lambda i=index: self.remove_attachment(i)); item.add_css_class('pill'); self.attach_box.append(item)
 
@@ -1804,7 +1894,7 @@ class Pocket(Gtk.Application):
         window, content = self.dialog('Ajustes', 520)
         content.append(label('KzL Agent 0.7.0 · Darktech nativo', 'brand'))
         content.append(label('Demonstração isolada, sem API.' if self.client.demo else 'Gateway local: http://127.0.0.1:49375', wrap=True))
-        content.append(label('Atalhos: Ctrl+F busca nas mensagens carregadas · Ctrl+N cria conversa · Enter envia · Shift+Enter quebra linha. Os atalhos da janela não atuam por trás de diálogos.', 'muted', True))
+        content.append(label('Atalhos: Ctrl+K busca conversas · Ctrl+F busca nas mensagens carregadas · Ctrl+N cria conversa · Enter envia · Shift+Enter quebra linha. Os atalhos da janela não atuam por trás de diálogos.', 'muted', True))
         themes = Gtk.DropDown.new_from_strings(['Sistema', 'Claro', 'Escuro']); themes.set_selected(['system', 'light', 'dark'].index(self.store.data.get('theme', 'system')))
         themes.connect('notify::selected', lambda *_: self.apply_theme(['system', 'light', 'dark'][themes.get_selected()])); content.append(label('Aparência')); content.append(themes)
         if not self.client.demo:
@@ -1849,14 +1939,25 @@ class Pocket(Gtk.Application):
         self.store.data['theme'] = theme; self.persist()
 
     def toggle_sidebar(self):
-        self.sidebar.set_visible(not self.sidebar.get_visible())
+        visible = not self.sidebar.get_visible()
+        self.sidebar.set_visible(visible)
+        if self.portrait.get_active():
+            self.content.set_visible(not visible)
 
     def portrait_changed(self, *_):
         active = self.portrait.get_active(); self.store.data['portrait'] = active; self.persist()
-        self.sidebar.set_visible(not active)
+        self.sidebar.set_visible(not active); self.content.set_visible(True)
+        self.sidebar.set_hexpand(active)
+        (self.window.add_css_class if active else self.window.remove_css_class)('compact')
+        margins(self.content, 0 if active else 8)
+        for widget, spacing in ((self.message_box, 14 if active else 24), (self.compose, 12 if active else 24)):
+            widget.set_margin_start(spacing); widget.set_margin_end(spacing)
+        self.composer_footer.set_orientation(Gtk.Orientation.VERTICAL if active else Gtk.Orientation.HORIZONTAL)
+        self.composer_footer.set_spacing(6 if active else 12)
+        self.options_button.set_halign(Gtk.Align.START if active else Gtk.Align.END)
         self.window.set_resizable(not active)
         # GTK client-side decoration reserves 5px per side in this theme.
-        self.window.set_default_size(424 if active else 1180, 906 if active else 820)
+        self.window.set_default_size(424 if active else 1280, 906 if active else 860)
 
     def close(self, *_):
         if self.closing:
