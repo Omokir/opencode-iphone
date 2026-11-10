@@ -64,7 +64,7 @@ Exec=/usr/bin/python3 "{exe}" --demo
         with os.fdopen(fd, 'wb') as file:
             file.write(data); file.flush(); os.fsync(file.fileno())
         os.replace(temporary, path)
-    result = {'version': '0.7.0', 'files': {str(path): digest(data) for path, data in files.items()}}
+    result = {'version': '0.8.0', 'files': {str(path): digest(data) for path, data in files.items()}}
     # Manifest carries only installation hashes, never credentials or prompts.
     temporary = destination / 'install-manifest.new'
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)

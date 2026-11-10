@@ -2094,7 +2094,7 @@ class Pocket(Gtk.Application):
 
     def settings(self):
         window, content = self.dialog('Ajustes', 520)
-        content.append(label('KzL Agent 0.7.0 · Darktech nativo', 'brand'))
+        content.append(label('KzL Agent 0.8.0 · Center · Darktech nativo', 'brand'))
         content.append(button(text='Conexões · MCPs e contas', callback=self.connections))
         content.append(label('Demonstração isolada, sem API.' if self.client.demo else 'Gateway local: http://127.0.0.1:49375', wrap=True))
         content.append(label('Atalhos: Ctrl+K busca conversas · Ctrl+F busca nas mensagens carregadas · Ctrl+N cria conversa · Enter envia · Shift+Enter quebra linha. Os atalhos da janela não atuam por trás de diálogos.', 'muted', True))
