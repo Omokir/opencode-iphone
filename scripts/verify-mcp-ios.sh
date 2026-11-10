@@ -21,7 +21,15 @@ SCRATCH="/Volumes/KzLNative-$(uuidgen)"
 hdiutil create -quiet -size 1g -fs HFS+ -volname KzLNative "$BASE/scratch.dmg"
 hdiutil attach -quiet -nobrowse -owners on -mountpoint "$SCRATCH" "$BASE/scratch.dmg"
 STAGE=prepare-inputs
-trap 'code=$?; echo "Native stage: $STAGE, exit: $code"; hdiutil detach -quiet "$SCRATCH" || true' EXIT
+cleanup() {
+  code=$?
+  echo "Native stage: $STAGE, exit: $code"
+  if (( code != 0 )); then
+    sudo /usr/bin/log show --last 1m --style compact --predicate 'process == "sandboxd" OR (process == "kernel" AND eventMessage CONTAINS "swift")' 2>/dev/null | tail -n 50 || true
+  fi
+  hdiutil detach -quiet "$SCRATCH" || true
+}
+trap cleanup EXIT
 WORK="$SCRATCH/work"
 mkdir -p "$WORK/home" "$WORK/tmp" "$WORK/cache" "$SCRATCH/source/ios" "$SCRATCH/source/tests" "$SCRATCH/rtc" "$SCRATCH/support"
 # Copy only compilation inputs, never runner HOME, git auth, sockets or caches.
@@ -75,6 +83,9 @@ run() {
     /usr/bin/python3 -I "$SCRATCH/support/watchdog.py" "$PROFILE" "$@"
 }
 cd "$SOURCE"
+STAGE=sandbox-preflight
+run /usr/bin/true
+run "$SWIFTC" --version
 STAGE=compile-registry-tests
 run "$SWIFTC" -target "$(uname -m)-apple-macos13.0" -sdk "$MACSDK" \
   -module-cache-path "$WORK/cache" -parse-as-library -framework CryptoKit \
