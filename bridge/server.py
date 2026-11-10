@@ -27,6 +27,8 @@ from inbox import PhoneInbox
 from storage import storage_status
 from kzl import KzL, KzLError
 from computer_activity import task_steps, task_image
+from connections import inventory as connection_inventory
+from connection_registry import ConnectionRegistry, RegistryConflict
 
 STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
@@ -43,13 +45,13 @@ RULES = {
     'GET': [r'/api/info', r'/api/experimental/voice/models', r'/api/session', r'/api/session/active', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
             r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices', r'/phone/power/status',
-             r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)',
+              r'/phone/connections', r'/phone/connections/registry', r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)',
               r'/phone/kzl/(context|tasks|capabilities|memory|events)', r'/phone/kzl/task/job_[A-Za-z0-9_-]+/computer(?:/image)?', r'/api/(command|skill)',
               r'/api/session/ses[^/]+/(inbox|diff)', r'/api/experimental/schedule', r'/api/permission/request', r'/api/form',
               r'/api/experimental/session/ses[^/]+/terminal/read'],
     'POST': [r'/api/experimental/voice/session', r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
-              r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)', r'/phone/session/read-state',
+               r'/phone/connections/registry', r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)', r'/phone/session/read-state',
                r'/phone/kzl/(ensure|submit|turn)', r'/phone/kzl/task/job_[A-Za-z0-9_-]+/(cancel|update)',
                r'/api/session/ses[^/]+/command', r'/api/experimental/session/ses[^/]+/skill',
                r'/api/experimental/schedule', r'/api/experimental/schedule/[^/]+/(pause|resume)'],
@@ -313,6 +315,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(401, {'error': 'Pareie novamente no notebook.'})
             if not allowed(self.command, path):
                 return self.reply(403, {'error': 'Route not available to mobile client'})
+            if path == '/phone/connections/registry':
+                registry = ConnectionRegistry(STATE / 'connections')
+                if self.command == 'GET':
+                    return self.reply(200, {'registry': registry.read(), 'runtimeConfirmed': False})
+                if length > 32768:
+                    return self.reply(413, {'error': 'Registry request too large'})
+                payload = json.loads(self.rfile.read(length) or b'{}')
+                if not isinstance(payload, dict) or set(payload) - {'revision', 'operation', 'name', 'config', 'directory'}:
+                    return self.reply(400, {'error': 'Invalid registry request'})
+                value = registry.change(payload.get('revision'), payload.get('operation'), payload.get('name'),
+                                        payload.get('config'), payload.get('directory'))
+                # Persistence is acknowledged, never runtime connection/revocation.
+                # The OpenCode adapter reconciles each loaded location separately.
+                return self.reply(200, {'registry': value, 'runtimeConfirmed': False})
+            if path == '/phone/connections':
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                return self.reply(200, connection_inventory(upstream, query.get('directory', [''])[0]))
             if path == '/phone/kzl/events':
                 if not STREAM_SLOTS.acquire(blocking=False):
                     return self.reply(429, {'error': 'Muitas conexões de atualização.'})
@@ -463,7 +482,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, coordinator.memory())
                 if path == '/phone/kzl/capabilities':
                     query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-                    return self.reply(200, coordinator.capabilities(query.get('q', [''])[0]))
+                    return self.reply(200, coordinator.capabilities(query.get('q', [''])[0], query.get('sessionID', [None])[0]))
                 if path == '/phone/kzl/tasks':
                     return self.reply(200, {'tasks': coordinator.jobs()})
                 payload = json.loads(body or b'{}')
@@ -556,6 +575,8 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(error.status, error.body)
         except (BrokenPipeError, ConnectionResetError):
             pass
+        except RegistryConflict:
+            self.reply(409, {'error': 'Registro alterado. Consulte estado atual antes de tentar novamente.'})
         except (ValueError, TypeError, json.JSONDecodeError):
             self.reply(400, {'error': 'Invalid request'})
         except Exception:

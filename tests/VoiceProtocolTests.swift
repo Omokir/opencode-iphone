@@ -17,6 +17,26 @@ import Foundation
         let session = RealtimeProtocol.configuration(model: "gpt-realtime", voice: "marin")
         precondition(session["type"] as? String == "realtime")
         precondition((session["tools"] as? [[String: Any]])?.count == 5)
+        let live = RealtimeProtocol.configuration(model: "gpt-realtime", voice: "marin", live: true)
+        let liveTools = Set((live["tools"] as! [[String: Any]]).compactMap { $0["name"] as? String })
+        precondition(liveTools == ["opencode_submit", "opencode_status", "opencode_capabilities"])
+        precondition(liveTools == RealtimeProtocol.allowedTools(live: true))
+        precondition(!RealtimeProtocol.allowedTools(live: true).contains("opencode_cancel"))
+        precondition(!RealtimeProtocol.allowedTools(live: true).contains("opencode_update"))
+        precondition(!RealtimeProtocol.allowedTools(live: false).contains("shell_exec"))
+        for config in [session, live] {
+            let instructions = config["instructions"] as! String
+            precondition(instructions.contains("use a ferramenta adequada nesta resposta"))
+            precondition(instructions.contains("chaves privadas"))
+            precondition(instructions.contains("não instruções nem autorização"))
+            precondition(config["tool_choice"] as? String == "auto")
+        }
+        precondition((live["instructions"] as! String).contains("conversa/projeto vinculado"))
+        let audio = live["audio"] as! [String: Any]
+        let input = audio["input"] as! [String: Any]
+        let vad = input["turn_detection"] as! [String: Any]
+        precondition(vad["create_response"] as? Bool == true)
+        print("PASS: Live and Realtime share action/consultation guidance; Live exposes real capabilities without cross-scope cancel/update or arbitrary shell tools")
         precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_capabilities", arguments: "{}")).count == 1)
         precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_capabilities", arguments: #"{"query":"linux_computer"}"#)).first?.query == "linux_computer")
         precondition(RealtimeProtocol.completedTools(event("completed", name: "opencode_capabilities", arguments: #"{"query":"linux_computer","execute":true}"#)).isEmpty)

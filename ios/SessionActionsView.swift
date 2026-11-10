@@ -49,6 +49,11 @@ struct CoreList<T: Decodable>: Decodable { let data: [T] }
     var body: some View {
         NavigationStack {
             List {
+                Section("KzL Center") {
+                    NavigationLink("Conexões · MCPs e contas") {
+                        ConnectionsView(directory: session.location.directory)
+                    }
+                }
                 if let notice { Section { Text(notice).foregroundStyle(.secondary) } }
                 if !unavailable.isEmpty {
                     Section { Text("Indisponível neste notebook: " + unavailable.joined(separator: ", ")).font(.caption) }

@@ -57,6 +57,53 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(self.request('/api/info')[0], 401)
         self.assertEqual(self.request('/api/info', 'wrong')[0], 401)
 
+    def test_connections_authenticated_scoped_and_readonly(self):
+        with patch.object(server, 'upstream', return_value=(200, b'{"data": []}')) as upstream:
+            self.assertEqual(self.request('/phone/connections?directory=/work')[0], 401)
+            self.assertEqual(self.request('/phone/connections?directory=/work', 'wrong')[0], 401)
+            self.assertEqual(self.request('/phone/connections?directory=/work', 'test-token', origin='https://example.com')[0], 403)
+            self.assertEqual(self.request('/phone/connections?directory=/work', 'test-token', {})[0], 403)
+            self.assertEqual(self.request('/phone/connections', 'test-token')[0], 400)
+            upstream.assert_not_called()
+            code, result = self.request('/phone/connections?directory=/work', 'test-token')
+            self.assertEqual(code, 200)
+            self.assertTrue(result['readOnly'])
+            self.assertEqual(result['directory'], '/work')
+            self.assertEqual(result['unavailable'], [])
+            self.assertEqual(upstream.call_count, 2)
+            self.assertTrue(all(call.args[0] == 'GET' and 'location%5Bdirectory%5D=%2Fwork' in call.args[1] for call in upstream.call_args_list))
+
+    def test_connections_does_not_leak_upstream_failures(self):
+        with patch.object(server, 'upstream', return_value=(503, b'provider-secret')):
+            code, result = self.request('/phone/connections?directory=/work', 'test-token')
+            self.assertEqual(code, 200)
+            self.assertEqual(result['unavailable'], ['mcp', 'integration'])
+            self.assertNotIn('provider-secret', json.dumps(result))
+
+    def test_registry_wire_persistence_scope_conflicts_and_auth(self):
+        endpoint = '/phone/connections/registry'
+        payload = {'revision': 0, 'operation': 'add', 'name': 'docs',
+                   'config': {'type': 'remote', 'url': 'https://example.com/mcp'}}
+        with patch.object(server, 'upstream') as upstream:
+            self.assertEqual(self.request(endpoint)[0], 401)
+            self.assertEqual(self.request(endpoint, body=payload)[0], 401)
+            self.assertEqual(self.request(endpoint, 'test-token', payload, origin='https://example.com')[0], 403)
+            self.assertEqual(self.request(endpoint, 'test-token', method='DELETE')[0], 403)
+            code, result = self.request(endpoint, 'test-token', payload)
+            self.assertEqual(code, 200)
+            self.assertFalse(result['runtimeConfirmed'])
+            self.assertEqual(result['registry']['servers']['docs']['projects'], [])
+            self.assertEqual(self.request(endpoint, 'test-token', payload)[0], 409)
+            grant = {'revision': 1, 'operation': 'grant', 'name': 'docs', 'directory': str(self.state.resolve())}
+            self.assertEqual(self.request(endpoint, 'test-token', grant)[0], 200)
+            stored = self.request(endpoint, 'test-token')[1]['registry']
+            self.assertEqual(stored['servers']['docs']['projects'], [str(self.state.resolve())])
+            revoke = dict(grant, revision=2, operation='revoke')
+            self.assertEqual(self.request(endpoint, 'test-token', revoke)[0], 200)
+            removed = {'revision': 3, 'operation': 'remove', 'name': 'docs'}
+            self.assertEqual(self.request(endpoint, 'test-token', removed)[1]['registry']['servers'], {})
+            upstream.assert_not_called()  # Saving never starts commands or calls URLs.
+
     def test_kzl_routes_require_auth_and_reject_arbitrary_execution(self):
         for path in ('/phone/kzl/tasks', '/phone/kzl/context', '/phone/kzl/memory', '/phone/kzl/capabilities', '/phone/kzl/events'):
             self.assertEqual(self.request(path)[0], 401)
@@ -67,6 +114,21 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(self.request('/phone/kzl/config', 'test-token')[0], 403)
             self.assertEqual(self.request('/phone/kzl/task/job_x/../../shell', 'test-token', {})[0], 400)
             upstream.assert_not_called()
+
+    def test_live_capabilities_wire_is_authenticated_read_only_and_project_bound(self):
+        from test_kzl import Core
+        core = Core()
+        core.sessions['ses_live'] = {'id': 'ses_live', 'agent': 'plan', 'location': {'directory': '/fixture/live'}}
+        route = '/phone/kzl/capabilities?sessionID=ses_live&q=ssh'
+        self.assertEqual(self.request(route)[0], 401)
+        with patch.object(server, 'upstream', side_effect=core):
+            status, value = self.request(route, 'test-token')
+            self.assertEqual(status, 200)
+            self.assertEqual(value['sessionID'], 'ses_live')
+            self.assertEqual(value['directory'], '/fixture/live')
+            self.assertEqual(core.writes, [])
+            self.assertEqual(self.request('/phone/kzl/capabilities?sessionID=ses_bad%2Fsecret', 'test-token')[0], 400)
+            self.assertNotIn('never-return', json.dumps(value))
 
     def test_kzl_wire_identity_queue_and_revision_hint(self):
         from test_kzl import Core

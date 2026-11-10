@@ -188,6 +188,29 @@ class KzLTests(unittest.TestCase):
         self.assertTrue(value['servers'][0]['connected'])
         self.assertFalse(value['servers'][1]['connected'])
 
+    def test_live_capabilities_use_selected_project_without_kzl_initialization_or_writes(self):
+        other = KzL(Path(self.temp.name)/'no-kzl', self.core)
+        sid = 'ses_live_fixture'
+        self.core.sessions[sid] = {'id': sid, 'agent': 'plan', 'location': {'directory': '/fixture/live-project'}}
+        before = list(self.core.writes)
+        calls = []
+        def upstream(method, path, raw):
+            calls.append((method, path)); return self.core(method, path, raw)
+        other.upstream = upstream
+        try:
+            result = other.capabilities('ssh', sid)
+            self.assertEqual(result['sessionID'], sid)
+            self.assertEqual(result['directory'], '/fixture/live-project')
+            self.assertEqual(result['agent'], 'plan')
+            self.assertEqual(self.core.writes, before)
+            self.assertTrue(all(method == 'GET' for method, _ in calls))
+            self.assertTrue(any('location%5Bdirectory%5D=%2Ffixture%2Flive-project' in path for _, path in calls))
+            with self.assertRaises(KzLError):
+                other.capabilities('ssh', 'ses_../../secret')
+            self.assertNotIn('never-return', json.dumps(result))
+        finally:
+            other.close()
+
     def test_persistent_turns_are_idempotent_and_bounded(self):
         turn = {'id': 'turn_1', 'role': 'user', 'text': 'Remember fixture'}
         self.kzl.remember(turn)

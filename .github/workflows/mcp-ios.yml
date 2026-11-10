@@ -1,0 +1,23 @@
+name: Verify MCP iPhone
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/kzl-center]
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Fetch pinned WebRTC framework (not executed)
+        run: |
+          mkdir -p "$RUNNER_TEMP/kzl-webrtc"
+          curl --fail --location --max-time 120 'https://github.com/stasel/WebRTC/releases/download/156.0.0/WebRTC-M156.xcframework.zip' -o "$RUNNER_TEMP/kzl-webrtc/rtc.zip"
+          echo "43c2a6f7a650185bbc911d7605a979589671886e8fc0ac283f54fdf3f511dc46  $RUNNER_TEMP/kzl-webrtc/rtc.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/kzl-webrtc/rtc.zip" -d "$RUNNER_TEMP/kzl-webrtc"
+      - name: Offline sandboxed native tests and iPhone typecheck
+        run: bash scripts/verify-mcp-ios.sh "$RUNNER_TEMP/kzl-webrtc/WebRTC.xcframework/ios-arm64"

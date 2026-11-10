@@ -370,8 +370,13 @@ class KzL:
             rows = list(db.execute('SELECT id,role,text,created FROM turns WHERE parent=? ORDER BY created DESC LIMIT 100', (self.session_id(),)))
         return {'turns': [dict(row) for row in reversed(rows)]}
 
-    def capabilities(self, search=''):
-        parent = self.request('GET', '/api/session/' + self.session_id())
+    def capabilities(self, search='', session_id=None):
+        if session_id is not None and not valid_id(session_id, 'ses'):
+            raise KzLError(400, 'Conversa de consulta inválida.')
+        sid = session_id if session_id is not None else self.session_id()
+        parent = self.request('GET', '/api/session/' + sid)
+        if parent.get('id') != sid:
+            raise KzLError(503, 'Escopo de consulta não confirmado.')
         query = '?' + urllib.parse.urlencode({'location[directory]': parent['location']['directory']})
         servers = self.request('GET', '/api/mcp' + query)
         agents = self.request('GET', '/api/agent' + query)
@@ -380,7 +385,7 @@ class KzL:
         return {'servers': [{'name': str(s.get('name', ''))[:120],
                              'connected': s.get('status', {}).get('status') == 'connected'} for s in (servers or [])[:100]],
                 'agents': [{'id': a['id'], 'name': str(a.get('name', ''))[:120]} for a in (agents or [])[:40] if not a.get('hidden')],
-                'agent': parent.get('agent'), 'directory': parent['location']['directory'],
+                'sessionID': sid, 'agent': parent.get('agent'), 'directory': parent['location']['directory'],
                 'toolCatalogComplete': registry['complete'], 'catalog': registry,
                 'note': 'MCP conectado não prova disponibilidade/permissão de ferramenta específica. OpenCode descobre ferramentas ao executar; não invente capacidades.'}
 

@@ -1890,9 +1890,134 @@ class Pocket(Gtk.Application):
         create = button(text='Agendar uma execução', callback=create_schedule); content.append(create)
         content.append(button(text='Atualizar estado', callback=load)); load()
 
+    def connections(self):
+        if not self.session:
+            self.error('Abra uma conversa para consultar as conexões desse projeto.'); return
+        directory = self.session['location']['directory']
+        window, content = self.dialog('Conexões · KzL Center', 620)
+        content.append(label('Projeto: ' + directory, 'muted', True))
+        content.append(label('Consulta somente leitura. Não instala MCPs, não autentica contas e não concede permissões.', wrap=True))
+        content.append(label('API OpenAI é cobrada por uso, separadamente da assinatura ChatGPT. Métodos listados não comprovam saldo nem acesso a um modelo.', 'muted', True))
+        content.append(button(text='Gerenciar cadastro MCP e acesso deste projeto', callback=lambda: self.manage_connections(directory)))
+        rows = box(True, 10); content.append(rows)
+        status = label('', 'muted', True); content.append(status)
+        busy = False
+        def load():
+            nonlocal busy
+            if busy:
+                return
+            busy = True; refresh.set_sensitive(False); clear(rows)
+            status.set_text('Consultando conexões…')
+            def done(value):
+                nonlocal busy
+                busy = False
+                if window not in self.dialogs:
+                    return
+                refresh.set_sensitive(True)
+                if value.get('directory') != directory:
+                    status.set_text('Resposta de outro projeto recusada.'); return
+                unavailable = value.get('unavailable', [])
+                names = {'connected': 'Conectado', 'pending': 'Conectando', 'disabled': 'Desativado', 'failed': 'Falhou', 'needs_auth': 'Precisa autenticar', 'unknown': 'Não confirmado'}
+                rows.append(label('Servidores MCP', 'chat-title'))
+                for item in value.get('mcp', []):
+                    rows.append(label(item['name'] + ' · ' + names.get(item['status'], 'Não confirmado'), wrap=True))
+                if not value.get('mcp'):
+                    rows.append(label('Consulta indisponível.' if 'mcp' in unavailable else 'Nenhum servidor neste projeto.', wrap=True))
+                rows.append(label('Contas e integrações', 'chat-title'))
+                for item in value.get('integrations', []):
+                    rows.append(label(item['name'] + ' · métodos: ' + ', '.join(item['methods']) + ' · conexões registradas: ' + str(item['connectionCount']), wrap=True))
+                if not value.get('integrations'):
+                    rows.append(label('Consulta indisponível.' if 'integration' in unavailable else 'Nenhuma integração neste projeto.', wrap=True))
+                status.set_text('Consulta parcial; algumas categorias estão indisponíveis.' if unavailable else 'Estado consultado. Conectado não significa autorização para executar ações.')
+            def failed(_):
+                nonlocal busy
+                busy = False
+                if window in self.dialogs:
+                    refresh.set_sensitive(True); status.set_text('Conexões indisponíveis. Verifique pareamento, gateway e versão instalada.')
+            path = '/phone/connections?' + urllib.parse.urlencode({'directory': directory})
+            self.async_job(lambda: self.client.request(path), done, failed, scoped=False)
+        refresh = button(text='Atualizar conexões', callback=load); content.append(refresh); load()
+
+    def manage_connections(self, directory):
+        window, content = self.dialog('Cadastro MCP · ' + directory, 680)
+        content.append(label('Cadastro global, acesso por projeto. Habilitar MCP local executa seu comando no computador. Confira origem e argumentos. Não coloque segredos no comando; ambiente aceita apenas referências {env:NOME}.', 'error-banner', True))
+        content.append(label('Persistência não confirma ativação. Adaptador KzL deve estar instalado no OpenCode. Após alterar, consulte Conexões; revogar não interrompe operações já admitidas.', 'muted', True))
+        rows = box(True, 10); content.append(rows)
+        name = Gtk.Entry(placeholder_text='Nome: letras minúsculas, números, _ ou -'); content.append(name)
+        name.update_property([Gtk.AccessibleProperty.LABEL], ['Nome do servidor MCP'])
+        config = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR); config.set_size_request(-1, 100)
+        config.update_property([Gtk.AccessibleProperty.LABEL], ['Configuração MCP em JSON, sem segredos'])
+        config.get_buffer().set_text('{"type":"remote","url":"https://example.com/mcp"}')
+        content.append(config)
+        status = label('', 'muted', True); content.append(status)
+        revision = None; busy = False; uncertain = False
+        def controls():
+            add.set_sensitive(revision is not None and not busy and not uncertain)
+            refresh.set_sensitive(not busy)
+        def display(value):
+            nonlocal revision, uncertain
+            revision = value['registry']['revision']; uncertain = False; clear(rows)
+            for server, record in value['registry']['servers'].items():
+                granted = directory in record['projects']
+                row = box(True, 5)
+                row.append(label(server + (' · acesso declarado neste projeto' if granted else ' · sem acesso neste projeto'), wrap=True))
+                description = json.dumps(record['config'], ensure_ascii=False)
+                row.append(label(description, 'muted', True))
+                row.append(button(text='Revogar neste projeto' if granted else 'Habilitar neste projeto',
+                    callback=lambda n=server, g=granted, d=description: prepare('revoke' if g else 'grant', n, detail=d)))
+                row.append(button(text='Remover cadastro global', callback=lambda n=server: prepare('remove', n)))
+                rows.append(row)
+            status.set_text('Registro lido · revisão ' + str(revision) + '. Estado em execução deve ser consultado separadamente.'); controls()
+        def load():
+            nonlocal busy
+            if busy:
+                return
+            busy = True; clear(rows); controls()
+            def done(value):
+                nonlocal busy
+                busy = False
+                if window in self.dialogs: display(value)
+            def failed(_):
+                nonlocal busy, revision
+                busy = False; revision = None
+                if window in self.dialogs: status.set_text('Registro indisponível. Nada alterado.'); controls()
+            self.async_job(lambda: self.client.request('/phone/connections/registry'), done, failed, scoped=False)
+        def prepare(operation, server, declaration=None, detail=''):
+            if busy or uncertain or revision is None:
+                return
+            payload = {'revision': revision, 'operation': operation, 'name': server}
+            if operation == 'add': payload['config'] = declaration
+            if operation in ('grant', 'revoke'): payload['directory'] = directory
+            warning = {'add': 'Salvar cadastro sem ativar', 'grant': 'Autorizar conexão MCP neste projeto',
+                       'revoke': 'Revogar conexão neste projeto', 'remove': 'Remover cadastro e acessos de todos os projetos'}[operation]
+            self.confirm(warning, server + '\nProjeto: ' + directory + '\n' + detail + '\nNão concede aprovação irrestrita para ferramentas. Alterações em execução precisam de confirmação posterior.', lambda: write(payload))
+        def write(payload):
+            nonlocal busy
+            if busy or uncertain or window not in self.dialogs or revision != payload['revision']:
+                return
+            busy = True; clear(rows); controls(); status.set_text('Salvando registro…')
+            def done(value):
+                nonlocal busy
+                busy = False
+                if window in self.dialogs: display(value)
+            def failed(_):
+                nonlocal busy, uncertain
+                busy = False; uncertain = True
+                if window in self.dialogs:
+                    status.set_text('Alteração não confirmada. Nenhuma repetição automática. Atualize registro e confira estado antes de outra ação.'); controls()
+            self.async_job(lambda: self.client.request('/phone/connections/registry', 'POST', payload), done, failed, scoped=False)
+        def add_server():
+            buffer = config.get_buffer()
+            try: value = json.loads(buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False))
+            except ValueError: status.set_text('JSON inválido.'); return
+            prepare('add', name.get_text().strip(), value, json.dumps(value, ensure_ascii=False))
+        add = button(text='Revisar novo cadastro', callback=add_server); content.append(add)
+        refresh = button(text='Consultar registro atual', callback=load); content.append(refresh); load()
+
     def settings(self):
         window, content = self.dialog('Ajustes', 520)
         content.append(label('KzL Agent 0.7.0 · Darktech nativo', 'brand'))
+        content.append(button(text='Conexões · MCPs e contas', callback=self.connections))
         content.append(label('Demonstração isolada, sem API.' if self.client.demo else 'Gateway local: http://127.0.0.1:49375', wrap=True))
         content.append(label('Atalhos: Ctrl+K busca conversas · Ctrl+F busca nas mensagens carregadas · Ctrl+N cria conversa · Enter envia · Shift+Enter quebra linha. Os atalhos da janela não atuam por trás de diálogos.', 'muted', True))
         themes = Gtk.DropDown.new_from_strings(['Sistema', 'Claro', 'Escuro']); themes.set_selected(['system', 'light', 'dark'].index(self.store.data.get('theme', 'system')))
