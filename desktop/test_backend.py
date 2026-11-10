@@ -10,7 +10,7 @@ from backend import Store, Gateway, DemoGateway, PocketError, ReadRetry, activit
 
 # Reuse only the synthetic fixture server, never the installed gateway.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'preview'))
-from test_server import start_fixture, FixtureGateway
+from transport_fixture import start_fixture, FixtureGateway
 
 
 class BackendTests(unittest.TestCase):

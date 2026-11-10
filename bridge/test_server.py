@@ -57,6 +57,26 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(self.request('/api/info')[0], 401)
         self.assertEqual(self.request('/api/info', 'wrong')[0], 401)
 
+    def test_openai_auth_routes_require_pairing_and_never_forward_secrets(self):
+        from test_accounts import Core, SECRET
+        core = Core()
+        route = '/phone/openai/key'
+        payload = {'requestID': 'wire_key', 'directory': '/fixture', 'key': SECRET}
+        with patch.object(server, 'upstream', side_effect=core):
+            self.assertEqual(self.request('/phone/openai?directory=/fixture')[0], 401)
+            self.assertEqual(self.request(route, body=payload)[0], 401)
+            self.assertEqual(self.request(route, 'test-token', payload, origin='https://example.com')[0], 403)
+            self.assertEqual(self.request('/api/credential', 'test-token')[0], 403)
+            self.assertFalse(core.calls)
+            status, result = self.request(route, 'test-token', payload)
+            self.assertEqual(status, 200)
+            self.assertEqual(result['status'], 'stored')
+            self.assertFalse(result['active'])
+            self.assertNotIn(SECRET, json.dumps(result))
+            self.assertEqual(self.request(route, 'test-token', payload)[0], 409)
+            self.assertEqual(sum(m == 'POST' for m, _ in core.calls), 1)
+            self.assertEqual(core.active, 'existing-chatgpt')
+
     def test_connections_authenticated_scoped_and_readonly(self):
         with patch.object(server, 'upstream', return_value=(200, b'{"data": []}')) as upstream:
             self.assertEqual(self.request('/phone/connections?directory=/work')[0], 401)

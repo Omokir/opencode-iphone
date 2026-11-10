@@ -142,6 +142,28 @@ try:
         time.sleep(.1)
     assert call_count() == before, 'Revoked MCP executed'
     print('PASS: model request after revocation produces zero additional MCP calls', flush=True)
+
+    # Exercise the installed engine's actual credential contract with dummy
+    # values only. This HOME has never contained a user account or real key.
+    from accounts import OpenAIAccounts
+    accounts = OpenAIAccounts(root / 'accounts', lambda method, path, body:
+        (200, json.dumps(request(path, body=json.loads(body) if body else None)).encode()))
+    metadata = accounts.inventory(str(a))
+    print('PASS: actual OpenCode OpenAI methods discovered:', [m['type'] for m in metadata['methods']], flush=True)
+    integration = metadata['integrationID']
+    original = request('/api/credential', body={'id': 'fixture_existing', 'integrationID': integration,
+        'label': 'Synthetic existing account', 'value': {'type': 'key', 'key': 'synthetic-existing-not-a-key'}})['data']
+    assert original['active'] is True
+    created = accounts.add_key({'requestID': 'fixture_auth', 'directory': str(a), 'key': 'synthetic-new-not-a-key'}, 'fixture-device')
+    assert created['status'] == 'stored' and created['active'] is False
+    # Credential reads are test-only against this empty disposable engine;
+    # gateway production code never exposes or calls this endpoint.
+    credentials = request('/api/credential')['data']
+    assert next(c for c in credentials if c['id'] == 'fixture_existing')['active'] is True
+    assert next(c for c in credentials if c['id'] == created['credentialID'])['active'] is False
+    for file in (root / 'accounts').iterdir():
+        assert b'synthetic-new-not-a-key' not in file.read_bytes()
+    print('PASS: actual OpenCode stores dummy API credential inactive; existing active account preserved; gateway receipt contains no key', flush=True)
 finally:
     process.terminate()
     try: process.wait(timeout=10)

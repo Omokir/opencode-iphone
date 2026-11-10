@@ -11,7 +11,7 @@ import urllib.parse
 
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE / 'preview'))
-from test_server import FixtureGateway
+from transport_fixture import FixtureGateway
 sys.path.insert(0, str(BASE / 'bridge'))
 from files import FileError
 from inbox import PhoneInbox

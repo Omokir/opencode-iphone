@@ -8,7 +8,7 @@ import time
 import traceback
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'preview'))
-from test_server import start_fixture
+from transport_fixture import start_fixture
 if os.environ.get('POCKET_TEST_INSTALL'):
     sys.path.insert(0, os.environ['POCKET_TEST_INSTALL'])
 from main import Pocket, Gtk, GLib

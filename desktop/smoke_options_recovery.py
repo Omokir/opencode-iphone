@@ -12,7 +12,7 @@ import traceback
 from http.server import ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent/'preview'))
-from test_server import FixtureGateway
+from transport_fixture import FixtureGateway
 
 
 class Handler(FixtureGateway):

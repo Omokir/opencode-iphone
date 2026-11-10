@@ -29,6 +29,7 @@ from kzl import KzL, KzLError
 from computer_activity import task_steps, task_image
 from connections import inventory as connection_inventory
 from connection_registry import ConnectionRegistry, RegistryConflict
+from accounts import OpenAIAccounts, AccountError
 
 STATE = Path.home() / '.local/state/opencode-iphone'
 SERVICE_CONFIG = Path.home() / '.config/opencode/service.json'
@@ -45,13 +46,13 @@ RULES = {
     'GET': [r'/api/info', r'/api/experimental/voice/models', r'/api/session', r'/api/session/active', r'/api/session/ses[^/]+',
             r'/api/session/ses[^/]+/(message|permission|form)', r'/api/session/ses[^/]+/message/msg[^/]+',
             r'/phone/status', r'/phone/catalog', r'/phone/control/status', r'/phone/codex/usage', r'/phone/devices', r'/phone/power/status',
-              r'/phone/connections', r'/phone/connections/registry', r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)',
+              r'/phone/openai', r'/phone/openai/operation', r'/phone/connections', r'/phone/connections/registry', r'/phone/files/(roots|list|download|receipt|context)', r'/phone/inbox/(verify|progress)', r'/phone/session/ses[^/]+/(events|search)',
               r'/phone/kzl/(context|tasks|capabilities|memory|events)', r'/phone/kzl/task/job_[A-Za-z0-9_-]+/computer(?:/image)?', r'/api/(command|skill)',
               r'/api/session/ses[^/]+/(inbox|diff)', r'/api/experimental/schedule', r'/api/permission/request', r'/api/form',
               r'/api/experimental/session/ses[^/]+/terminal/read'],
     'POST': [r'/api/experimental/voice/session', r'/api/session', r'/api/session/ses[^/]+/(prompt|interrupt|agent|model)',
              r'/api/session/ses[^/]+/permission/[^/]+/reply', r'/api/session/ses[^/]+/form/[^/]+/reply',
-               r'/phone/connections/registry', r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)', r'/phone/session/read-state',
+               r'/phone/openai/(key|oauth|complete)', r'/phone/connections/registry', r'/phone/mode', r'/phone/control/(start|stop)', r'/phone/files/upload', r'/phone/inbox/(prepare|upload|chunk|commit)', r'/phone/devices/revoke', r'/phone/power/(prepare|off)', r'/phone/session/read-state',
                r'/phone/kzl/(ensure|submit|turn)', r'/phone/kzl/task/job_[A-Za-z0-9_-]+/(cancel|update)',
                r'/api/session/ses[^/]+/command', r'/api/experimental/session/ses[^/]+/skill',
                r'/api/experimental/schedule', r'/api/experimental/schedule/[^/]+/(pause|resume)'],
@@ -299,6 +300,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/phone/session/read-state': maximum = 16384
             if path == '/api/experimental/voice/session': maximum = 256 * 1024
             if path.startswith('/phone/kzl/'): maximum = 64 * 1024
+            if path.startswith('/phone/openai'): maximum = 16 * 1024
             if length < 0 or (path != '/phone/inbox/upload' and length > maximum) or self.headers.get('Transfer-Encoding'):
                 return self.reply(413, {'error': 'Request too large'})
             self.connection.settimeout(10)
@@ -315,6 +317,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(401, {'error': 'Pareie novamente no notebook.'})
             if not allowed(self.command, path):
                 return self.reply(403, {'error': 'Route not available to mobile client'})
+            if path.startswith('/phone/openai'):
+                accounts = OpenAIAccounts(STATE / 'accounts', upstream)
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                if path == '/phone/openai':
+                    return self.reply(200, accounts.inventory(query.get('directory', [''])[0]))
+                if path == '/phone/openai/operation':
+                    return self.reply(200, accounts.status(query.get('id', [''])[0], current_device))
+                payload = json.loads(self.rfile.read(length) or b'{}')
+                if path == '/phone/openai/key':
+                    return self.reply(200, accounts.add_key(payload, current_device))
+                if path == '/phone/openai/complete':
+                    return self.reply(200, accounts.complete_oauth(payload, current_device))
+                return self.reply(200, accounts.start_oauth(payload, current_device))
             if path == '/phone/connections/registry':
                 registry = ConnectionRegistry(STATE / 'connections')
                 if self.command == 'GET':
@@ -571,7 +586,7 @@ class Handler(BaseHTTPRequestHandler):
             if status == 200 and self.command == 'GET' and re.fullmatch(r'/api/session/ses[^/]+/message(?:/msg[^/]+)?', path):
                 result = mobile_messages(result)
             return self.reply(status, result)
-        except (FileError, KzLError) as error:
+        except (FileError, KzLError, AccountError) as error:
             self.reply(error.status, error.body)
         except (BrokenPipeError, ConnectionResetError):
             pass

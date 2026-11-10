@@ -12,7 +12,7 @@ class InstallTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             result = install(home)
-            self.assertEqual(len(result['files']), 11)
+            self.assertEqual(len(result['files']), 12)
             for path, expected in result['files'].items():
                 self.assertEqual(digest(Path(path).read_bytes()), expected)
             self.assertEqual(result, install(home))

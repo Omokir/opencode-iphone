@@ -22,6 +22,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango
 from backend import Gateway, DemoGateway, Store, PocketError, ReadRetry, activity_rows, search_loaded_messages, tool_state_label, tool_progress, conversation_export, attachment, prompt_payload, field_visible, form_answers, experimental_session_path, artifacts, save_download, schedule_payload
 from richtext import render_native, safe_url
 from terminal_policy import directory_path
+from account_client import AccountClient
 
 ROOT = Path(__file__).resolve().parent
 STYLE = '''
@@ -1899,6 +1900,7 @@ class Pocket(Gtk.Application):
         content.append(label('Consulta somente leitura. Não instala MCPs, não autentica contas e não concede permissões.', wrap=True))
         content.append(label('API OpenAI é cobrada por uso, separadamente da assinatura ChatGPT. Métodos listados não comprovam saldo nem acesso a um modelo.', 'muted', True))
         content.append(button(text='Gerenciar cadastro MCP e acesso deste projeto', callback=lambda: self.manage_connections(directory)))
+        content.append(button(text='OpenAI · API e conta ChatGPT', callback=lambda: self.openai_accounts(directory)))
         rows = box(True, 10); content.append(rows)
         status = label('', 'muted', True); content.append(status)
         busy = False
@@ -2013,6 +2015,82 @@ class Pocket(Gtk.Application):
             prepare('add', name.get_text().strip(), value, json.dumps(value, ensure_ascii=False))
         add = button(text='Revisar novo cadastro', callback=add_server); content.append(add)
         refresh = button(text='Consultar registro atual', callback=load); content.append(refresh); load()
+
+    def openai_accounts(self, directory):
+        client = AccountClient(self.client, self.store, directory)
+        window, content = self.dialog('OpenAI · KzL Center', 620)
+        content.append(label('API usa cobrança por uso; ChatGPT usa limites da assinatura compatível. Conectar não inicia chamada paga nem muda modelo da conversa.', wrap=True))
+        content.append(label('Chave será enviada somente ao OpenCode deste computador. Cadastro preserva a credencial ativa existente. Se não houver uma, o OpenCode pode ativar esta chave. Seleção de credencial fica no OpenCode.', 'muted', True))
+        key = Gtk.Entry(visibility=False, placeholder_text='Chave OpenAI API · nunca incluída no histórico'); content.append(key)
+        key.update_property([Gtk.AccessibleProperty.LABEL], ['Chave OpenAI API protegida'])
+        methods = box(True, 8); content.append(methods)
+        status = label('', 'muted', True); content.append(status)
+        busy = False
+        def controls():
+            save.set_sensitive(not busy and not client.pending)
+            refresh.set_sensitive(not busy); receipt.set_sensitive(not busy and bool(client.pending))
+        def finish(text):
+            nonlocal busy
+            busy = False
+            if window in self.dialogs: status.set_text(text); controls()
+        def failed(_): finish('Autenticação indisponível ou não confirmada. Consulte resultado; nada será repetido automaticamente.')
+        def submit_key():
+            if busy or client.pending: return
+            self.confirm('Cadastrar chave OpenAI?', 'Salvar no OpenCode sem substituir login ativo existente. Não valida saldo nem acesso aos modelos. Nenhum teste pago será iniciado.', send_key)
+        def send_key():
+            nonlocal busy
+            if busy or client.pending or window not in self.dialogs: return
+            value = key.get_text().strip(); key.set_text('')
+            busy = True; controls()
+            def done(result):
+                finish('Credencial salva no OpenCode. ' + ('Tornou-se ativa por não existir outra credencial.' if result.get('active') else 'Login ativo existente preservado; esta chave não foi ativada.'))
+            self.async_job(lambda: client.add_key(value), done, failed, scoped=False)
+        def oauth(method):
+            if busy or client.pending: return
+            self.confirm('Entrar com ChatGPT?', 'Usar autorização oficial no navegador. Concluir login pode selecionar a nova conta no OpenCode; registros anteriores não são apagados. Assinatura não fornece créditos de API.', lambda: start(method))
+        def start(method):
+            nonlocal busy
+            if busy or client.pending or window not in self.dialogs: return
+            busy = True; controls()
+            def done(result):
+                finish('Abra autorização oficial e depois consulte resultado. ' + result.get('instructions', ''))
+                if window not in self.dialogs: return
+                # Link opening remains an explicit user gesture, never automatic.
+                link = Gtk.LinkButton(uri=result['url'], label='Abrir autorização oficial OpenAI')
+                methods.append(link)
+                if result.get('mode') == 'code' or result.get('paste'):
+                    status.set_text('Após autorização, cole código ou URL de retorno neste campo protegido, não no chat.')
+            self.async_job(lambda: client.start_oauth(method), done, failed, scoped=False)
+        def load():
+            nonlocal busy
+            if busy: return
+            busy = True; clear(methods); controls()
+            def done(value):
+                if window not in self.dialogs: return
+                for method in value.get('methods', []):
+                    if method.get('type') == 'oauth' and not method.get('requiresFields'):
+                        item = button(text=method['label'], callback=lambda m=method['id']: oauth(m)); item.set_sensitive(not client.pending); methods.append(item)
+                finish('Métodos oficiais consultados · conexões registradas: ' + str(len(value.get('connections', []))) + '. Conexão registrada não comprova saldo ou acesso ao modelo.')
+            self.async_job(client.inventory, done, failed, scoped=False)
+        def poll():
+            nonlocal busy
+            if busy or not client.pending: return
+            busy = True; controls()
+            self.async_job(client.status, lambda result: finish('Estado da tentativa: ' + result['status'] + '. Nenhuma operação reenviada.'), failed, scoped=False)
+        code = Gtk.Entry(visibility=False, placeholder_text='Código OAuth ou URL de retorno, quando solicitado'); content.append(code)
+        code.update_property([Gtk.AccessibleProperty.LABEL], ['Código OAuth protegido'])
+        def complete():
+            if busy or not client.pending: return
+            self.confirm('Concluir autorização OpenAI?', 'Enviar código ou URL somente ao OpenCode. Nenhum código será salvo no histórico. A conta autorizada pode se tornar a selecionada no OpenCode.', send_code)
+        def send_code():
+            nonlocal busy
+            if busy or not client.pending or window not in self.dialogs: return
+            value = code.get_text().strip(); code.set_text(''); busy = True; controls()
+            self.async_job(lambda: client.complete_oauth(value), lambda result: finish('Estado OAuth: ' + result['status']), failed, scoped=False)
+        content.append(button(text='Revisar conclusão OAuth', callback=complete))
+        save = button(text='Revisar cadastro de chave API', callback=submit_key); content.append(save)
+        receipt = button(text='Consultar resultado da tentativa anterior', callback=poll); content.append(receipt)
+        refresh = button(text='Consultar métodos e contas', callback=load); content.append(refresh); load()
 
     def settings(self):
         window, content = self.dialog('Ajustes', 520)

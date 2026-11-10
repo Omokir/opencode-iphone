@@ -15,7 +15,7 @@ import traceback
 from http.server import ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent/'preview'))
-from test_server import FixtureGateway
+from transport_fixture import FixtureGateway
 
 SESSIONS = [{'id': 'ses_review_a', 'title': 'Review project A', 'agent': 'build', 'metadata': {}, 'location': {'directory': '/fixture/a'}},
             {'id': 'ses_review_b', 'title': 'Other project B', 'agent': 'plan', 'metadata': {}, 'location': {'directory': '/fixture/b'}}]

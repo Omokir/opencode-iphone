@@ -24,7 +24,7 @@ def install(home):
     desktop = home / '.local/share/applications/com.omokir.PocketDesktop.desktop'
     launcher = home / '.local/bin/opencode-pocket'
     primary = home / '.local/bin/kzl-agent'
-    files = {destination/name: (source/name).read_bytes() for name in ('main.py', 'backend.py', 'voice.py', 'uploads.py', 'richtext.py', 'terminal.py', 'terminal_policy.py', 'KzL.png')}
+    files = {destination/name: (source/name).read_bytes() for name in ('main.py', 'backend.py', 'account_client.py', 'voice.py', 'uploads.py', 'richtext.py', 'terminal.py', 'terminal_policy.py', 'KzL.png')}
     files[launcher] = ('#!/bin/sh\nexec /usr/bin/python3 ' + shlex.quote(str(destination/'main.py')) + ' "$@"\n').encode()
     files[primary] = files[launcher]
     exe = str(destination/'main.py').replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%')

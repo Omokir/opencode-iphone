@@ -30,7 +30,9 @@ The original worktree and its unpublished mobile changes are not modified.
 ## Not delivered yet
 
 - Adapter installation in the real user environment and native UI validation.
-- Provider sign-in/API-key entry and secure Linux vault integration.
+- iPhone provider account UI, activation/selection of passive API credentials,
+  and real-account authorization (requires the owner). Linux registration uses
+  OpenCode's existing credential store, not a second gateway secret store.
 - Installed updated gateway/desktop, iOS build/sign/install, screenshots and
   end-to-end tests on the owner's actual iPhone.
 - VPS central/local executor separation; no VPS deployment was requested yet.
@@ -96,3 +98,34 @@ gate remains fail-closed; compilation must use an execution environment with
 enforceable resource isolation. Automatic push triggering is disabled to avoid
 repeating blocked jobs. Manual dispatch remains available after the execution
 environment is corrected. No current app, pairing or credential was replaced.
+
+## OpenAI account integration (Linux/gateway source)
+
+- Linux Conexões → OpenAI supports masked API-key entry and official OAuth method
+  discovery/start/status/completion, each requiring explicit UI confirmation.
+- Keys are registered with `activate: false`. The existing active credential is
+  preserved. OpenCode can activate the first credential when none exists; the UI
+  states this. Passive-key selection remains in OpenCode, not silently in KzL.
+- OAuth completion can select the newly authorized account, with an explicit
+  warning; existing records are not deleted. Only recognized official OpenAI
+  authorization hosts may be opened, and only after a user gesture.
+- Raw credential listings, tokens and provider errors are never proxied to apps.
+  Key/code values are absent from gateway operation receipts and local journals.
+- One uncertain write fences another. Receipt IDs survive restart; reconciliation
+  uses GET-only integration metadata or OAuth status, never automatic resubmission.
+  An uncertain start without an attempt ID needs operator review in OpenCode.
+- `GET /phone/openai`, `GET /phone/openai/operation`, and POST
+  `/phone/openai/{key,oauth,complete}` use the existing paired-device authentication;
+  receipts are bound to that device. Browser-origin requests remain forbidden.
+
+Validation: 140 gateway tests and 92 desktop unit tests passed in offline Linux
+sandboxes. A native GTK smoke passed in private Xvfb/D-Bus with synthetic keys,
+cancelled confirmations, masked entries and lost-acknowledgement recovery. No
+browser was opened. The OpenCode 2.2.7 runtime fixture also confirmed actual
+inactive dummy credential creation while its previous active credential stayed
+active. OAuth exchange tests use a synthetic core, not a real provider account.
+
+Desktop tests now carry their original synthetic transport fixture in
+`desktop/transport_fixture.py`; they no longer require unpublished web-preview
+files. None of these account changes has been installed in the user's gateway
+or desktop, and no real account login or paid model request was initiated.

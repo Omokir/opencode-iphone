@@ -10,7 +10,7 @@ import urllib.parse
 from http.server import ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent/'preview'))
-from test_server import FixtureGateway
+from transport_fixture import FixtureGateway
 if os.environ.get('POCKET_TEST_INSTALL'):
     sys.path.insert(0, os.environ['POCKET_TEST_INSTALL'])
 from main import Pocket, Gtk, GLib

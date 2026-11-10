@@ -5,7 +5,7 @@ import time
 import traceback
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'preview'))
-from test_server import start_fixture, FixtureGateway
+from transport_fixture import start_fixture, FixtureGateway
 if os.environ.get('POCKET_TEST_INSTALL'):
     sys.path.insert(0, os.environ['POCKET_TEST_INSTALL'])
 from main import Pocket, GLib

@@ -92,7 +92,7 @@ class VoiceTests(unittest.TestCase):
 
     def test_approved_broker_contract_against_isolated_fixture(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'preview'))
-        from test_server import start_fixture, FixtureGateway
+        from transport_fixture import start_fixture, FixtureGateway
         server = start_fixture()
         try:
             with tempfile.TemporaryDirectory() as directory:
