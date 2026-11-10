@@ -1,6 +1,14 @@
 name: Verify MCP iPhone
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/kzl-center]
+    paths:
+      - .github/workflows/mcp-ios.yml
+      - scripts/verify-mcp-ios.sh
+      - scripts/macos-sandbox-run.py
+      - ios/**
+      - tests/*.swift
 permissions:
   contents: read
 jobs:

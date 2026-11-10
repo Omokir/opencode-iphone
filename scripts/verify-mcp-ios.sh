@@ -1,6 +1,18 @@
 #!/bin/bash
 # Parent-side orchestration: all Swift compilation/test execution is sandboxed.
 set -euo pipefail
+if [[ "${GITHUB_ACTIONS:-}" != true || "${RUNNER_OS:-}" != macOS || "${RUNNER_ARCH:-}" != ARM64 ]]; then
+  echo 'BLOCKED: requires a fresh standard GitHub arm64 macOS VM.' >&2; exit 78
+fi
+# Darwin does not enforce address-space/RSS rlimits. Memory/CPU isolation is
+# instead the standard runner VM's hypervisor boundary (documented 7 GB/3 CPUs).
+# Verify actual guest capacity; never silently use a larger/shared host.
+RAM="$(/usr/sbin/sysctl -n hw.memsize)"
+CPUS="$(/usr/sbin/sysctl -n hw.ncpu)"
+if (( RAM > 8589934592 || CPUS > 3 || RAM < 1073741824 )); then
+  echo 'BLOCKED: runner exceeds declared 8-GiB/3-vCPU VM resource ceiling.' >&2; exit 78
+fi
+echo "Verified dedicated VM resource boundary: ${RAM} bytes RAM, ${CPUS} vCPUs"
 SOURCE="$(pwd -P)"
 RTC="$(cd "$1" && pwd -P)"
 BASE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/kzl-native.XXXXXX")"
@@ -33,17 +45,11 @@ EOF
 # No network, inherited environment, credential sockets, user HOME or writable
 # source are exposed. Resource limits apply to compiler and test descendants.
 ulimit -t 240
-# Darwin rejects RLIMIT_AS and RLIMIT_DATA on this runner. Set only the
-# supported soft resident-set policy, preserving the runner's hard ceiling.
-if ! ulimit -S -m 1048576; then
-  echo 'BLOCKED: runner cannot enforce required memory resource policy; no target tests/compiler started.' >&2
-  exit 78
-fi
-ulimit -u 64
+ulimit -u 128
 ulimit -f 262144
 run() {
   /usr/bin/env -i HOME="$SCRATCH/home" TMPDIR="$SCRATCH/tmp" PATH=/usr/bin:/bin \
-    /usr/bin/sandbox-exec -f "$PROFILE" "$@"
+    /usr/bin/python3 -I "$SOURCE/scripts/macos-sandbox-run.py" "$PROFILE" "$@"
 }
 run "$SWIFTC" -target "$(uname -m)-apple-macos13.0" -sdk "$MACSDK" \
   -module-cache-path "$SCRATCH/cache" -parse-as-library -framework CryptoKit \
