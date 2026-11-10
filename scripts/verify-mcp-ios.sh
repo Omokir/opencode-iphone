@@ -20,7 +20,8 @@ SCRATCH="/Volumes/KzLNative-$(uuidgen)"
 # A private fixed-size volume bounds total writable test/compiler storage.
 hdiutil create -quiet -size 1g -fs HFS+ -volname KzLNative "$BASE/scratch.dmg"
 hdiutil attach -quiet -nobrowse -owners on -mountpoint "$SCRATCH" "$BASE/scratch.dmg"
-trap 'hdiutil detach -quiet "$SCRATCH" || true' EXIT
+STAGE=prepare-inputs
+trap 'code=$?; echo "Native stage: $STAGE, exit: $code"; hdiutil detach -quiet "$SCRATCH" || true' EXIT
 WORK="$SCRATCH/work"
 mkdir -p "$WORK/home" "$WORK/tmp" "$WORK/cache" "$SCRATCH/source/ios" "$SCRATCH/source/tests" "$SCRATCH/rtc" "$SCRATCH/support"
 # Copy only compilation inputs, never runner HOME, git auth, sockets or caches.
@@ -31,6 +32,7 @@ cp scripts/macos-sandbox-run.py "$SCRATCH/support/watchdog.py"
 SOURCE="$SCRATCH/source"
 RTC="$SCRATCH/rtc"
 USER_NAME=kzlfixture
+STAGE=create-fixture-user
 if id "$USER_NAME" >/dev/null 2>&1 || [[ -n "$(dscl . -search /Users UniqueID 65000)" ]]; then
   echo 'BLOCKED: fixture user/UID already exists.' >&2; exit 78
 fi
@@ -42,6 +44,8 @@ sudo dscl . -create "/Users/$USER_NAME" UserShell /usr/bin/false
 sudo dscl . -create "/Users/$USER_NAME" Password '*'
 sudo chown -R 65000:20 "$WORK"
 chmod 755 "$SCRATCH"
+echo 'Dedicated fixture user and read-only inputs prepared.'
+STAGE=resolve-toolchain
 SWIFTC="$(xcrun --find swiftc)"
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 MACSDK="$(xcrun --sdk macosx --show-sdk-path)"
@@ -53,6 +57,7 @@ cat > "$PROFILE" <<EOF
 (allow process-fork)
 (allow signal (target self))
 (allow sysctl-read)
+(deny file-read* (subpath "/Users") (subpath "/System/Volumes/Data/Users"))
 (allow file-read*
   (subpath "/Applications") (subpath "/System") (subpath "/Library")
   (subpath "/usr") (subpath "/bin") (subpath "/sbin")
@@ -70,14 +75,19 @@ run() {
     /usr/bin/python3 -I "$SCRATCH/support/watchdog.py" "$PROFILE" "$@"
 }
 cd "$SOURCE"
+STAGE=compile-registry-tests
 run "$SWIFTC" -target "$(uname -m)-apple-macos13.0" -sdk "$MACSDK" \
   -module-cache-path "$WORK/cache" -parse-as-library -framework CryptoKit \
   ios/MCPRegistry.swift tests/MCPRegistryTests.swift -o "$WORK/mcp-registry-test"
+STAGE=execute-registry-tests
 run "$WORK/mcp-registry-test"
+STAGE=compile-voice-tests
 run "$SWIFTC" -target "$(uname -m)-apple-macos13.0" -sdk "$MACSDK" \
   -module-cache-path "$WORK/cache" -parse-as-library \
   ios/RealtimeProtocol.swift ios/VoiceDiagnostics.swift tests/VoiceProtocolTests.swift -o "$WORK/voice-test"
+STAGE=execute-voice-tests
 run "$WORK/voice-test"
+STAGE=typecheck-iphone
 run "$SWIFTC" -typecheck -swift-version 5 -target arm64-apple-ios17.0 -sdk "$SDK" \
   -module-cache-path "$WORK/cache" -F "$RTC" -framework WebRTC ios/*.swift
 echo 'PASS: offline registry/voice native tests and all iPhone SwiftUI sources typechecked'
