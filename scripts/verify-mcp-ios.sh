@@ -16,17 +16,36 @@ echo "Verified dedicated VM resource boundary: ${RAM} bytes RAM, ${CPUS} vCPUs"
 SOURCE="$(pwd -P)"
 RTC="$(cd "$1" && pwd -P)"
 BASE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/kzl-native.XXXXXX")"
-SCRATCH="$BASE/volume"
-mkdir -p "$SCRATCH"
+SCRATCH="/Volumes/KzLNative-$(uuidgen)"
 # A private fixed-size volume bounds total writable test/compiler storage.
 hdiutil create -quiet -size 1g -fs HFS+ -volname KzLNative "$BASE/scratch.dmg"
-hdiutil attach -quiet -nobrowse -mountpoint "$SCRATCH" "$BASE/scratch.dmg"
+hdiutil attach -quiet -nobrowse -owners on -mountpoint "$SCRATCH" "$BASE/scratch.dmg"
 trap 'hdiutil detach -quiet "$SCRATCH" || true' EXIT
-mkdir -p "$SCRATCH/home" "$SCRATCH/tmp" "$SCRATCH/cache"
+WORK="$SCRATCH/work"
+mkdir -p "$WORK/home" "$WORK/tmp" "$WORK/cache" "$SCRATCH/source/ios" "$SCRATCH/source/tests" "$SCRATCH/rtc" "$SCRATCH/support"
+# Copy only compilation inputs, never runner HOME, git auth, sockets or caches.
+cp ios/*.swift "$SCRATCH/source/ios/"
+cp tests/MCPRegistryTests.swift tests/VoiceProtocolTests.swift "$SCRATCH/source/tests/"
+ditto "$RTC/WebRTC.framework" "$SCRATCH/rtc/WebRTC.framework"
+cp scripts/macos-sandbox-run.py "$SCRATCH/support/watchdog.py"
+SOURCE="$SCRATCH/source"
+RTC="$SCRATCH/rtc"
+USER_NAME=kzlfixture
+if id "$USER_NAME" >/dev/null 2>&1 || [[ -n "$(dscl . -search /Users UniqueID 65000)" ]]; then
+  echo 'BLOCKED: fixture user/UID already exists.' >&2; exit 78
+fi
+sudo dscl . -create "/Users/$USER_NAME"
+sudo dscl . -create "/Users/$USER_NAME" UniqueID 65000
+sudo dscl . -create "/Users/$USER_NAME" PrimaryGroupID 20
+sudo dscl . -create "/Users/$USER_NAME" NFSHomeDirectory "$WORK/home"
+sudo dscl . -create "/Users/$USER_NAME" UserShell /usr/bin/false
+sudo dscl . -create "/Users/$USER_NAME" Password '*'
+sudo chown -R 65000:20 "$WORK"
+chmod 755 "$SCRATCH"
 SWIFTC="$(xcrun --find swiftc)"
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 MACSDK="$(xcrun --sdk macosx --show-sdk-path)"
-PROFILE="$BASE/offline.sb"
+PROFILE="$SCRATCH/support/offline.sb"
 cat > "$PROFILE" <<EOF
 (version 1)
 (deny default)
@@ -39,26 +58,26 @@ cat > "$PROFILE" <<EOF
   (subpath "/usr") (subpath "/bin") (subpath "/sbin")
   (subpath "/private/etc") (subpath "/private/var/db")
   (subpath "/dev")
-  (subpath "$SOURCE") (subpath "$RTC") (subpath "$SCRATCH"))
-(allow file-write* (subpath "$SCRATCH") (literal "/dev/null"))
+  (subpath "$SOURCE") (subpath "$RTC") (subpath "$WORK"))
+(allow file-write* (subpath "$WORK") (literal "/dev/null"))
 EOF
+find "$SCRATCH/source" "$SCRATCH/rtc" "$SCRATCH/support" -type f -exec chmod 444 {} +
+find "$SCRATCH/source" "$SCRATCH/rtc" "$SCRATCH/support" -type d -exec chmod 555 {} +
 # No network, inherited environment, credential sockets, user HOME or writable
 # source are exposed. Resource limits apply to compiler and test descendants.
-ulimit -t 240
-ulimit -u 128
-ulimit -f 262144
 run() {
-  /usr/bin/env -i HOME="$SCRATCH/home" TMPDIR="$SCRATCH/tmp" PATH=/usr/bin:/bin \
-    /usr/bin/python3 -I "$SOURCE/scripts/macos-sandbox-run.py" "$PROFILE" "$@"
+  sudo -u "$USER_NAME" /usr/bin/env -i HOME="$WORK/home" TMPDIR="$WORK/tmp" PATH=/usr/bin:/bin \
+    /usr/bin/python3 -I "$SCRATCH/support/watchdog.py" "$PROFILE" "$@"
 }
+cd "$SOURCE"
 run "$SWIFTC" -target "$(uname -m)-apple-macos13.0" -sdk "$MACSDK" \
-  -module-cache-path "$SCRATCH/cache" -parse-as-library -framework CryptoKit \
-  ios/MCPRegistry.swift tests/MCPRegistryTests.swift -o "$SCRATCH/mcp-registry-test"
-run "$SCRATCH/mcp-registry-test"
+  -module-cache-path "$WORK/cache" -parse-as-library -framework CryptoKit \
+  ios/MCPRegistry.swift tests/MCPRegistryTests.swift -o "$WORK/mcp-registry-test"
+run "$WORK/mcp-registry-test"
 run "$SWIFTC" -target "$(uname -m)-apple-macos13.0" -sdk "$MACSDK" \
-  -module-cache-path "$SCRATCH/cache" -parse-as-library \
-  ios/RealtimeProtocol.swift ios/VoiceDiagnostics.swift tests/VoiceProtocolTests.swift -o "$SCRATCH/voice-test"
-run "$SCRATCH/voice-test"
+  -module-cache-path "$WORK/cache" -parse-as-library \
+  ios/RealtimeProtocol.swift ios/VoiceDiagnostics.swift tests/VoiceProtocolTests.swift -o "$WORK/voice-test"
+run "$WORK/voice-test"
 run "$SWIFTC" -typecheck -swift-version 5 -target arm64-apple-ios17.0 -sdk "$SDK" \
-  -module-cache-path "$SCRATCH/cache" -F "$RTC" -framework WebRTC ios/*.swift
+  -module-cache-path "$WORK/cache" -F "$RTC" -framework WebRTC ios/*.swift
 echo 'PASS: offline registry/voice native tests and all iPhone SwiftUI sources typechecked'

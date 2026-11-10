@@ -8,7 +8,12 @@ import os
 import signal
 import subprocess
 import sys
+import resource
 
+assert os.getuid() == 65000, 'Dedicated unprivileged fixture user required'
+resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
+resource.setrlimit(resource.RLIMIT_CPU, (240, 240))
+resource.setrlimit(resource.RLIMIT_FSIZE, (128 * 1024 * 1024, 128 * 1024 * 1024))
 environment = {key: os.environ[key] for key in ('HOME', 'TMPDIR', 'PATH')}
 process = subprocess.Popen(['/usr/bin/sandbox-exec', '-f', sys.argv[1], *sys.argv[2:]],
                            env=environment, start_new_session=True)
