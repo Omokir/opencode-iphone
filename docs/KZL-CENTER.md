@@ -29,12 +29,12 @@ The original worktree and its unpublished mobile changes are not modified.
 
 ## Not delivered yet
 
-- Adapter installation in the real user environment and native UI validation.
+- Native iPhone compilation/installation and real-device UI validation.
 - iPhone provider account UI, activation/selection of passive API credentials,
   and real-account authorization (requires the owner). Linux registration uses
   OpenCode's existing credential store, not a second gateway secret store.
-- Installed updated gateway/desktop, iOS build/sign/install, screenshots and
-  end-to-end tests on the owner's actual iPhone.
+- iOS build/sign/install, screenshots and end-to-end tests on the owner's actual
+  iPhone. The Linux deployment is recorded below.
 - VPS central/local executor separation; no VPS deployment was requested yet.
 
 OpenCode MCP experimental add/remove endpoints are runtime overrides, not durable
@@ -127,5 +127,32 @@ active. OAuth exchange tests use a synthetic core, not a real provider account.
 
 Desktop tests now carry their original synthetic transport fixture in
 `desktop/transport_fixture.py`; they no longer require unpublished web-preview
-files. None of these account changes has been installed in the user's gateway
-or desktop, and no real account login or paid model request was initiated.
+files. No real account login or paid model request was initiated.
+
+## Linux deployment 0.8.0
+
+Runtime source: `11dfc92871c5`, installed as a separate read-only release under
+`~/.local/share/kzl-center/releases/11dfc92871c5`. All 32 release files and 12
+desktop installation files were checked by SHA-256. Only software was backed up;
+existing credentials, SSH keys, conversations and preferences were not copied or
+replaced. Existing desktop windows were not closed.
+
+Gateway service `opencode-iphone-bridge.service` is active/running with a drop-in
+pointing to this release; original unit/source remain untouched. Existing
+loopback bind, private Tailscale publishing and paired-device authentication are
+preserved. Read-only live health checks returned HTTP 200 for `/api/info`,
+`/phone/connections`, `/phone/openai` and registry inventory. The existing 19 MCPs
+were available; two existing OpenAI connections remained registered. No managed
+MCP declaration or new real credential was created for deployment validation.
+
+OpenCode reported both `pocket.kzl-connections` and `local.linux-computer-use`
+active. The adapter was added through a new auto-loaded plugin directory; existing
+computer-control plugins, agent settings, consent/pause state and browser pairing
+were not altered.
+
+The installed release was exercised in an offline sandbox with the actual
+OpenCode binary, authenticated gateway and desktop transport: one-time pairing,
+MCP registration, exact-project grant, explicit reject/allow-once, one tool call,
+and revocation with no further calls. Its native account UI also passed the
+private Xvfb smoke using `/installed`, not the source tree. These are isolated
+acceptance checks, not proof of the full workflow on the real iPhone.

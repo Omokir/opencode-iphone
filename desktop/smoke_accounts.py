@@ -1,8 +1,12 @@
 """Private Xvfb/D-Bus only. Synthetic accounts; no network/provider/browser."""
 import time
+import os
 import sys
 import traceback
 from pathlib import Path
+if os.environ.get('POCKET_TEST_INSTALL'):
+    assert os.environ['POCKET_TEST_INSTALL'] == '/installed'
+    sys.path.insert(0, '/installed')
 from main import Pocket, Gtk, GLib
 from backend import PocketError
 
