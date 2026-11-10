@@ -35,7 +35,10 @@ EOF
 ulimit -t 240
 # Darwin rejects RLIMIT_AS and RLIMIT_DATA on this runner. Set only the
 # supported soft resident-set policy, preserving the runner's hard ceiling.
-ulimit -S -m 1048576
+if ! ulimit -S -m 1048576; then
+  echo 'BLOCKED: runner cannot enforce required memory resource policy; no target tests/compiler started.' >&2
+  exit 78
+fi
 ulimit -u 64
 ulimit -f 262144
 run() {

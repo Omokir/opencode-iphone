@@ -76,3 +76,23 @@ xcrun swiftc -parse-as-library -framework CryptoKit ios/MCPRegistry.swift tests/
 ```
 
 This test does not compile SwiftUI views or replace real iPhone validation.
+
+## Consolidated branch validation blocker
+
+The two changes from `ios-voice-0.17.1` (`e47c1a3`, `bc94613`) are reconciled:
+Live capability discovery and confirmed session/project binding are preserved.
+The consolidated iOS source version is 0.18.0/build 34; it is not an IPA release.
+All 130 bridge tests passed in a Linux namespace with no external network,
+private temporary HOME, read-only source, cgroup CPU/memory/process limits,
+128 MiB per-file limit, 256 MiB writable tmpfs and a 90-second deadline.
+
+Native verification was attempted in three macOS jobs. Runner refused
+RLIMIT_AS, RLIMIT_DATA and finally the soft resident-set policy with
+`ulimit: ... cannot modify limit: Invalid argument`. Most recent evidence:
+https://github.com/Omokir/opencode-iphone/actions/runs/42917186675
+
+No target Swift compilation/test execution occurred in these jobs. The memory
+gate remains fail-closed; compilation must use an execution environment with
+enforceable resource isolation. Automatic push triggering is disabled to avoid
+repeating blocked jobs. Manual dispatch remains available after the execution
+environment is corrected. No current app, pairing or credential was replaced.

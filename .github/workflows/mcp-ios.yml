@@ -1,8 +1,6 @@
 name: Verify MCP iPhone
 on:
   workflow_dispatch:
-  push:
-    branches: [feat/kzl-center]
 permissions:
   contents: read
 jobs:
