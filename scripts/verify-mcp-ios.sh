@@ -33,7 +33,9 @@ EOF
 # No network, inherited environment, credential sockets, user HOME or writable
 # source are exposed. Resource limits apply to compiler and test descendants.
 ulimit -t 240
-ulimit -v 8388608
+# Darwin rejects RLIMIT_AS; use its supported data/resident limits instead.
+ulimit -d 2097152
+ulimit -m 2097152
 ulimit -u 64
 ulimit -f 262144
 run() {
